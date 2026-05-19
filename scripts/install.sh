@@ -52,11 +52,7 @@ print_path_setup_hint() {
       return
       ;;
     bash)
-      if [ -f "$HOME/.bashrc" ]; then
-        profile_path="$HOME/.bashrc"
-      else
-        profile_path="$HOME/.bash_profile"
-      fi
+      profile_path="$HOME/.bash_profile"
       profile_line="export PATH=\"$shell_install_dir:\$PATH\""
       echo "Add this to your bash profile:"
       echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""

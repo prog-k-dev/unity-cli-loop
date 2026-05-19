@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security;
 
 using UnityEngine;
 
@@ -15,11 +16,12 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
     {
         private const string ZSH_CONFIGURATION_FILE_NAME = ".zshrc";
         private const string BASH_PROFILE_FILE_NAME = ".bash_profile";
-        private const string BASH_RC_FILE_NAME = ".bashrc";
         private const string FISH_CONFIGURATION_DIRECTORY = ".config/fish";
         private const string FISH_CONFIGURATION_FILE_NAME = "config.fish";
         private const string ZDOTDIR_ENVIRONMENT_VARIABLE = "ZDOTDIR";
         private const string HOME_REFERENCE = "$HOME";
+        private const string PATH_ENVIRONMENT_VARIABLE_NAME = "PATH";
+        private const string FISH_ADD_PATH_COMMAND = "fish_add_path";
 
         public static CliPathSetupPlan BuildCurrentUserPlan(RuntimePlatform platform)
         {
@@ -54,19 +56,16 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 NodeEnvironmentResolver.GetUserShell(),
                 Environment.GetEnvironmentVariable(CliConstants.POSIX_HOME_ENVIRONMENT_VARIABLE),
                 Environment.GetEnvironmentVariable(ZDOTDIR_ENVIRONMENT_VARIABLE),
-                installDirectory,
-                File.Exists);
+                installDirectory);
         }
 
         internal static CliPathSetupPlan BuildPosixPlan(
             string shellPath,
             string homeDirectory,
             string zDotDirectory,
-            string installDirectory,
-            Func<string, bool> fileExists)
+            string installDirectory)
         {
             Debug.Assert(!string.IsNullOrWhiteSpace(installDirectory), "installDirectory must not be null or empty");
-            Debug.Assert(fileExists != null, "fileExists must not be null");
 
             string resolvedHomeDirectory = string.IsNullOrWhiteSpace(homeDirectory)
                 ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -91,10 +90,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             if (string.Equals(shellName, "bash", StringComparison.Ordinal))
             {
-                string bashRcPath = Path.Combine(resolvedHomeDirectory, BASH_RC_FILE_NAME);
-                string configurationPath = fileExists(bashRcPath)
-                    ? bashRcPath
-                    : Path.Combine(resolvedHomeDirectory, BASH_PROFILE_FILE_NAME);
+                string configurationPath = Path.Combine(resolvedHomeDirectory, BASH_PROFILE_FILE_NAME);
                 string configurationLine = BuildPosixExportLine(profileInstallDirectory);
                 return BuildSupportedPlan(
                     CliPathSetupShellKind.Bash,
@@ -160,31 +156,47 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                     "This shell is not supported for automatic PATH setup.");
             }
 
-            string existingContent = fileExists(plan.ConfigurationFilePath)
-                ? readAllText(plan.ConfigurationFilePath)
-                : string.Empty;
-            if (ContainsInstallDirectoryReference(existingContent, plan))
+            string existingContent = string.Empty;
+            try
             {
+                existingContent = fileExists(plan.ConfigurationFilePath)
+                    ? readAllText(plan.ConfigurationFilePath)
+                    : string.Empty;
+                if (ContainsInstallDirectoryReference(existingContent, plan))
+                {
+                    return new CliPathSetupApplyResult(
+                        true,
+                        CliPathSetupApplyStatus.AlreadyConfigured,
+                        "");
+                }
+
+                string directory = Path.GetDirectoryName(plan.ConfigurationFilePath);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    createDirectory(directory);
+                }
+
+                string prefix = NeedsLeadingNewLine(existingContent) ? Environment.NewLine : string.Empty;
+                appendAllText(
+                    plan.ConfigurationFilePath,
+                    prefix + plan.ConfigurationLine + Environment.NewLine);
                 return new CliPathSetupApplyResult(
                     true,
-                    CliPathSetupApplyStatus.AlreadyConfigured,
+                    CliPathSetupApplyStatus.Applied,
                     "");
             }
-
-            string directory = Path.GetDirectoryName(plan.ConfigurationFilePath);
-            if (!string.IsNullOrEmpty(directory))
+            catch (IOException ex)
             {
-                createDirectory(directory);
+                return BuildFileSystemFailure(ex);
             }
-
-            string prefix = NeedsLeadingNewLine(existingContent) ? Environment.NewLine : string.Empty;
-            appendAllText(
-                plan.ConfigurationFilePath,
-                prefix + plan.ConfigurationLine + Environment.NewLine);
-            return new CliPathSetupApplyResult(
-                true,
-                CliPathSetupApplyStatus.Applied,
-                "");
+            catch (UnauthorizedAccessException ex)
+            {
+                return BuildFileSystemFailure(ex);
+            }
+            catch (SecurityException ex)
+            {
+                return BuildFileSystemFailure(ex);
+            }
         }
 
         internal static bool ContainsInstallDirectoryReference(string content, CliPathSetupPlan plan)
@@ -197,52 +209,108 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 return false;
             }
 
-            if (ContainsPathReference(content, plan.InstallDirectory))
-            {
-                return true;
-            }
-
-            if (ContainsPathReference(content, plan.ProfileInstallDirectory))
-            {
-                return true;
-            }
-
-            if (!plan.ProfileInstallDirectory.StartsWith(HOME_REFERENCE + "/", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            string homeRelativeSuffix = plan.ProfileInstallDirectory.Substring(HOME_REFERENCE.Length);
-            string bracedHomeReference = "${HOME}" + homeRelativeSuffix;
-            if (ContainsPathReference(content, bracedHomeReference))
-            {
-                return true;
-            }
-
-            string tildeReference = "~" + homeRelativeSuffix;
-            return ContainsPathReference(content, tildeReference);
-        }
-
-        private static bool ContainsPathReference(string content, string pathReference)
-        {
-            Debug.Assert(pathReference != null, "pathReference must not be null");
-
+            string[] pathReferences = BuildPathReferenceCandidates(plan);
             string[] lines = content.Replace("\r\n", "\n").Split('\n');
             foreach (string line in lines)
             {
-                string trimmedLine = line.TrimStart();
-                if (trimmedLine.StartsWith("#", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                if (ContainsDelimitedPathReference(line, pathReference))
+                if (ContainsPathSetupLine(line, pathReferences, plan.ShellKind))
                 {
                     return true;
                 }
             }
 
             return false;
+        }
+
+        private static bool ContainsPathSetupLine(
+            string line,
+            string[] pathReferences,
+            CliPathSetupShellKind shellKind)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(pathReferences != null, "pathReferences must not be null");
+
+            string trimmedLine = line.TrimStart();
+            if (trimmedLine.StartsWith("#", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            foreach (string pathReference in pathReferences)
+            {
+                if (!ContainsDelimitedPathReference(line, pathReference))
+                {
+                    continue;
+                }
+
+                return shellKind == CliPathSetupShellKind.Fish
+                    ? StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND)
+                    : ContainsPosixPathAssignment(trimmedLine);
+            }
+
+            return false;
+        }
+
+        private static string[] BuildPathReferenceCandidates(CliPathSetupPlan plan)
+        {
+            if (!plan.ProfileInstallDirectory.StartsWith(HOME_REFERENCE + "/", StringComparison.Ordinal))
+            {
+                return new[] { plan.InstallDirectory, plan.ProfileInstallDirectory };
+            }
+
+            string homeRelativeSuffix = plan.ProfileInstallDirectory.Substring(HOME_REFERENCE.Length);
+            return new[]
+            {
+                plan.InstallDirectory,
+                plan.ProfileInstallDirectory,
+                "${HOME}" + homeRelativeSuffix,
+                "~" + homeRelativeSuffix
+            };
+        }
+
+        private static bool ContainsPosixPathAssignment(string line)
+        {
+            int searchStartIndex = 0;
+            while (searchStartIndex < line.Length)
+            {
+                int pathIndex = line.IndexOf(PATH_ENVIRONMENT_VARIABLE_NAME, searchStartIndex, StringComparison.Ordinal);
+                if (pathIndex < 0)
+                {
+                    return false;
+                }
+
+                int afterPathIndex = pathIndex + PATH_ENVIRONMENT_VARIABLE_NAME.Length;
+                if (IsShellNameStartBoundary(line, pathIndex - 1)
+                    && IsShellNameEndBoundary(line, afterPathIndex)
+                    && IsAssignmentAfterToken(line, afterPathIndex))
+                {
+                    return true;
+                }
+
+                searchStartIndex = afterPathIndex;
+            }
+
+            return false;
+        }
+
+        private static bool IsAssignmentAfterToken(string line, int index)
+        {
+            int cursor = index;
+            while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+            {
+                cursor++;
+            }
+
+            return cursor < line.Length && line[cursor] == '=';
+        }
+
+        private static bool StartsWithShellCommand(string line, string command)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(!string.IsNullOrEmpty(command), "command must not be null or empty");
+
+            return line.StartsWith(command, StringComparison.Ordinal)
+                && IsShellNameEndBoundary(line, command.Length);
         }
 
         private static bool ContainsDelimitedPathReference(string line, string pathReference)
@@ -308,6 +376,42 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 || character == ']'
                 || character == '}'
                 || character == '$';
+        }
+
+        private static bool IsShellNameStartBoundary(string line, int index)
+        {
+            if (index < 0)
+            {
+                return true;
+            }
+
+            char character = line[index];
+            return !IsShellNameCharacter(character);
+        }
+
+        private static bool IsShellNameEndBoundary(string line, int index)
+        {
+            if (index >= line.Length)
+            {
+                return true;
+            }
+
+            char character = line[index];
+            return !IsShellNameCharacter(character);
+        }
+
+        private static bool IsShellNameCharacter(char character)
+        {
+            return char.IsLetterOrDigit(character)
+                || character == '_';
+        }
+
+        private static CliPathSetupApplyResult BuildFileSystemFailure(Exception ex)
+        {
+            return new CliPathSetupApplyResult(
+                false,
+                CliPathSetupApplyStatus.Failed,
+                ex.Message);
         }
 
         private static CliPathSetupPlan BuildSupportedPlan(

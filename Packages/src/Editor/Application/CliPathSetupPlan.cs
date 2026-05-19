@@ -20,7 +20,8 @@ namespace io.github.hatayama.UnityCliLoop.Application
     {
         Applied,
         AlreadyConfigured,
-        Unsupported
+        Unsupported,
+        Failed
     }
 
     /// <summary>
