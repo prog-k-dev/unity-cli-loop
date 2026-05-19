@@ -179,6 +179,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(plan.ShellKind, Is.EqualTo(CliPathSetupShellKind.Unsupported));
             Assert.That(plan.CanApplyAutomatically, Is.False);
             Assert.That(plan.ConfigurationFilePath, Is.Empty);
+            Assert.That(plan.ManualCommand, Is.EqualTo("export PATH='/Users/ExampleUser/.local/bin':\"$PATH\""));
         }
 
         [Test]
@@ -294,6 +295,75 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(result.Success, Is.True);
             Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
             Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenPathAssignmentIsOnlyEchoedAppendsLine()
+        {
+            // Verifies that quoted documentation text does not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "echo 'export PATH=\"$HOME/.local/bin:$PATH\"'\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenPathAssignmentOnlyPrefixesCommandAppendsLine()
+        {
+            // Verifies that one-shot command environments do not count as profile PATH setup.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "PATH=\"$HOME/.local/bin:$PATH\" some-command\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenLeadingPathAssignmentExistsSkipsAppend()
+        {
+            // Verifies that real shell PATH assignments remain idempotent without export.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "PATH=\"$HOME/.local/bin:$PATH\"; export PATH\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
         }
 
         [Test]

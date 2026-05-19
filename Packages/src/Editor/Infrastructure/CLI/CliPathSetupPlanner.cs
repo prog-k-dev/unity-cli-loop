@@ -28,6 +28,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         private const string XDG_CONFIG_HOME_ENVIRONMENT_VARIABLE = "XDG_CONFIG_HOME";
         private const string HOME_REFERENCE = "$HOME";
         private const string PATH_ENVIRONMENT_VARIABLE_NAME = "PATH";
+        private const string POSIX_EXPORT_COMMAND = "export";
         private const string FISH_ADD_PATH_COMMAND = "fish_add_path";
         private const string FISH_SET_COMMAND = "set";
         private const int ZSH_CONFIGURATION_ROOT_PROCESS_TIMEOUT_MS = 5000;
@@ -148,7 +149,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 installDirectory,
                 "",
                 "",
-                $"Add {installDirectory} to {CliConstants.POSIX_PATH_ENVIRONMENT_VARIABLE} in your shell profile.");
+                BuildUnsupportedShellManualCommand(installDirectory));
         }
 
         internal static string ResolveZshConfigurationRoot(
@@ -390,28 +391,50 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         {
             Debug.Assert(line != null, "line must not be null");
 
-            int searchStartIndex = 0;
-            while (searchStartIndex < line.Length)
+            valueStartIndex = -1;
+            if (StartsWithShellCommand(line, POSIX_EXPORT_COMMAND))
             {
-                int pathIndex = line.IndexOf(PATH_ENVIRONMENT_VARIABLE_NAME, searchStartIndex, StringComparison.Ordinal);
-                if (pathIndex < 0)
+                return TryGetExportedPathAssignmentValueStart(line, out valueStartIndex);
+            }
+
+            int afterPathIndex = PATH_ENVIRONMENT_VARIABLE_NAME.Length;
+            return line.StartsWith(PATH_ENVIRONMENT_VARIABLE_NAME, StringComparison.Ordinal)
+                && IsShellNameEndBoundary(line, afterPathIndex)
+                && TryGetAssignmentValueStartIndex(line, afterPathIndex, out valueStartIndex)
+                && IsPersistentPosixPathAssignment(line, valueStartIndex);
+        }
+
+        private static bool TryGetExportedPathAssignmentValueStart(string line, out int valueStartIndex)
+        {
+            Debug.Assert(line != null, "line must not be null");
+
+            valueStartIndex = -1;
+            int cursor = POSIX_EXPORT_COMMAND.Length;
+            while (cursor < line.Length)
+            {
+                while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
                 {
-                    valueStartIndex = -1;
+                    cursor++;
+                }
+
+                if (cursor >= line.Length)
+                {
                     return false;
                 }
 
-                int afterPathIndex = pathIndex + PATH_ENVIRONMENT_VARIABLE_NAME.Length;
-                if (IsShellNameStartBoundary(line, pathIndex - 1)
-                    && IsShellNameEndBoundary(line, afterPathIndex)
-                    && TryGetAssignmentValueStartIndex(line, afterPathIndex, out valueStartIndex))
+                if (line[cursor] == '-')
                 {
-                    return true;
+                    cursor = SkipShellToken(line, cursor);
+                    continue;
                 }
 
-                searchStartIndex = afterPathIndex;
+                int afterPathIndex = cursor + PATH_ENVIRONMENT_VARIABLE_NAME.Length;
+                return line.Substring(cursor).StartsWith(PATH_ENVIRONMENT_VARIABLE_NAME, StringComparison.Ordinal)
+                    && IsShellNameEndBoundary(line, afterPathIndex)
+                    && TryGetAssignmentValueStartIndex(line, afterPathIndex, out valueStartIndex)
+                    && IsPersistentPosixPathAssignment(line, valueStartIndex);
             }
 
-            valueStartIndex = -1;
             return false;
         }
 
@@ -437,6 +460,74 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             valueStartIndex = cursor;
             return true;
+        }
+
+        private static bool IsPersistentPosixPathAssignment(string line, int valueStartIndex)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(valueStartIndex >= 0, "valueStartIndex must be zero or greater");
+
+            int cursor = SkipShellAssignmentValue(line, valueStartIndex);
+            while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+            {
+                cursor++;
+            }
+
+            return cursor >= line.Length || line[cursor] == '#' || line[cursor] == ';';
+        }
+
+        private static int SkipShellAssignmentValue(string line, int index)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(index >= 0, "index must be zero or greater");
+
+            int cursor = index;
+            if (cursor < line.Length && (line[cursor] == '"' || line[cursor] == '\''))
+            {
+                return SkipQuotedShellValue(line, cursor);
+            }
+
+            while (cursor < line.Length
+                && !char.IsWhiteSpace(line[cursor])
+                && line[cursor] != '#'
+                && line[cursor] != ';')
+            {
+                if (line[cursor] == '\\' && cursor + 1 < line.Length)
+                {
+                    cursor += 2;
+                    continue;
+                }
+
+                cursor++;
+            }
+
+            return cursor;
+        }
+
+        private static int SkipQuotedShellValue(string line, int quoteIndex)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(quoteIndex >= 0, "quoteIndex must be zero or greater");
+
+            char quote = line[quoteIndex];
+            int cursor = quoteIndex + 1;
+            while (cursor < line.Length)
+            {
+                if (quote == '"' && line[cursor] == '\\' && cursor + 1 < line.Length)
+                {
+                    cursor += 2;
+                    continue;
+                }
+
+                if (line[cursor] == quote)
+                {
+                    return cursor + 1;
+                }
+
+                cursor++;
+            }
+
+            return cursor;
         }
 
         private static bool TryGetFishPathSetValueStart(string line, out int valueStartIndex)
@@ -856,6 +947,15 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             return $"mkdir -p {QuotePosixShellValue(configurationDirectory)} && "
                 + $"echo {QuotePosixShellValue(configurationLine)} >> {QuotePosixShellValue(configurationPath)}";
+        }
+
+        private static string BuildUnsupportedShellManualCommand(string installDirectory)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(installDirectory), "installDirectory must not be null or empty");
+
+            return "export " + PATH_ENVIRONMENT_VARIABLE_NAME + "="
+                + QuotePosixShellValue(installDirectory)
+                + ":\"$" + PATH_ENVIRONMENT_VARIABLE_NAME + "\"";
         }
 
         private static string GetShellName(string shellPath)
