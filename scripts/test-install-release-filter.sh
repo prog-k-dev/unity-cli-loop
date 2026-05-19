@@ -646,6 +646,49 @@ MOCK_ZSH
   assert_file_not_exists "$zsh_config_dir/.zshrc"
 }
 
+test_posix_zsh_zdotdir_probe_does_not_read_installer_stdin() {
+  work_dir="$TMP_DIR/posix-zsh-zdotdir-stdin"
+  home_dir="$work_dir/home"
+  zsh_config_dir="$home_dir/.config/zsh"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir" "$zsh_config_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+  cat > "$mock_bin/zsh" <<'MOCK_ZSH'
+#!/bin/sh
+if IFS= read -r line; then
+  echo "zsh probe read installer stdin: $line" >&2
+  exit 23
+fi
+
+printf '%s\n' "__ULOOP_ZDOTDIR_START__"
+printf '%s\n' "$HOME/.config/zsh"
+printf '%s\n' "__ULOOP_ZDOTDIR_END__"
+MOCK_ZSH
+  chmod +x "$mock_bin/zsh"
+
+  printf '%s\n' "installer stdin must remain unread" | HOME="$home_dir" \
+    SHELL="$mock_bin/zsh" \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$zsh_config_dir/.zshrc\""
+  assert_file_not_exists "$zsh_config_dir/.zshrc"
+}
+
 test_posix_prints_bash_path_setup_command_without_profile_write() {
   work_dir="$TMP_DIR/posix-bash-path-hint"
   home_dir="$work_dir/home"
@@ -854,6 +897,7 @@ test_posix_removes_npm_package_before_replacing_same_bin_path
 test_posix_prints_zsh_path_setup_command_without_profile_write
 test_posix_escapes_single_quotes_in_path_setup_command
 test_posix_prints_zsh_path_setup_command_for_effective_zdotdir
+test_posix_zsh_zdotdir_probe_does_not_read_installer_stdin
 test_posix_prints_bash_path_setup_command_without_profile_write
 test_posix_prints_bash_path_setup_command_for_existing_profile
 test_posix_prints_fish_path_setup_command_without_profile_write

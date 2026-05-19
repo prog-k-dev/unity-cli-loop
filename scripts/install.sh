@@ -70,7 +70,7 @@ resolve_zsh_profile_path() {
 
   if [ -n "${SHELL:-}" ] && [ -x "$SHELL" ]; then
     resolved_zdotdir=$(
-      "$SHELL" -l -c 'printf "%s\n" "__ULOOP_ZDOTDIR_START__"; printf "%s\n" "${ZDOTDIR:-$HOME}"; printf "%s\n" "__ULOOP_ZDOTDIR_END__"' 2>/dev/null \
+      "$SHELL" -l -c 'printf "%s\n" "__ULOOP_ZDOTDIR_START__"; printf "%s\n" "${ZDOTDIR:-$HOME}"; printf "%s\n" "__ULOOP_ZDOTDIR_END__"' </dev/null 2>/dev/null \
         | extract_marked_first_line "__ULOOP_ZDOTDIR_START__" "__ULOOP_ZDOTDIR_END__" || true
     )
     if [ -n "$resolved_zdotdir" ]; then
