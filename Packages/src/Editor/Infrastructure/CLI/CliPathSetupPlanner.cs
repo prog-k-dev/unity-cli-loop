@@ -288,9 +288,13 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                     continue;
                 }
 
-                return shellKind == CliPathSetupShellKind.Fish
+                bool startsWithActiveSetup = shellKind == CliPathSetupShellKind.Fish
                     ? StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND)
-                    : ContainsPosixPathAssignment(trimmedLine);
+                    : StartsPosixPathAssignmentWithReference(trimmedLine, pathReference);
+                if (startsWithActiveSetup)
+                {
+                    return true;
+                }
             }
 
             return false;
@@ -313,8 +317,10 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             };
         }
 
-        private static bool ContainsPosixPathAssignment(string line)
+        private static bool StartsPosixPathAssignmentWithReference(string line, string pathReference)
         {
+            Debug.Assert(!string.IsNullOrWhiteSpace(pathReference), "pathReference must not be null or empty");
+
             int searchStartIndex = 0;
             while (searchStartIndex < line.Length)
             {
@@ -327,7 +333,8 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 int afterPathIndex = pathIndex + PATH_ENVIRONMENT_VARIABLE_NAME.Length;
                 if (IsShellNameStartBoundary(line, pathIndex - 1)
                     && IsShellNameEndBoundary(line, afterPathIndex)
-                    && IsAssignmentAfterToken(line, afterPathIndex))
+                    && TryGetAssignmentValueStartIndex(line, afterPathIndex, out int valueStartIndex)
+                    && StartsPathValueWithReference(line, valueStartIndex, pathReference))
                 {
                     return true;
                 }
@@ -338,7 +345,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return false;
         }
 
-        private static bool IsAssignmentAfterToken(string line, int index)
+        private static bool TryGetAssignmentValueStartIndex(string line, int index, out int valueStartIndex)
         {
             int cursor = index;
             while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
@@ -346,7 +353,40 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 cursor++;
             }
 
-            return cursor < line.Length && line[cursor] == '=';
+            if (cursor >= line.Length || line[cursor] != '=')
+            {
+                valueStartIndex = -1;
+                return false;
+            }
+
+            cursor++;
+            while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+            {
+                cursor++;
+            }
+
+            valueStartIndex = cursor;
+            return true;
+        }
+
+        private static bool StartsPathValueWithReference(string line, int valueStartIndex, string pathReference)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(valueStartIndex >= 0, "valueStartIndex must be zero or greater");
+            Debug.Assert(!string.IsNullOrWhiteSpace(pathReference), "pathReference must not be null or empty");
+
+            int cursor = valueStartIndex;
+            if (cursor < line.Length && (line[cursor] == '"' || line[cursor] == '\''))
+            {
+                cursor++;
+            }
+
+            if (!line.Substring(cursor).StartsWith(pathReference, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return IsPathReferenceEndBoundary(line, cursor + pathReference.Length);
         }
 
         private static bool StartsWithShellCommand(string line, string command)

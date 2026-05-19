@@ -269,6 +269,29 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void ApplyPlan_WhenInstallDirectoryIsShadowedInPathAssignmentAppendsLine()
+        {
+            // Verifies that shadowed PATH entries do not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"$HOME/.npm-global/bin:$HOME/.local/bin:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ApplyPlan_WhenFishAddPathExistsSkipsAppend()
         {
             // Verifies that fish_add_path is treated as an active PATH setup.
