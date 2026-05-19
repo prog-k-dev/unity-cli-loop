@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security;
 using System.Text;
@@ -20,9 +21,11 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         private const string BASH_PROFILE_FILE_NAME = ".bash_profile";
         private const string BASH_LOGIN_FILE_NAME = ".bash_login";
         private const string POSIX_PROFILE_FILE_NAME = ".profile";
-        private const string FISH_CONFIGURATION_DIRECTORY = ".config/fish";
+        private const string DEFAULT_XDG_CONFIGURATION_DIRECTORY = ".config";
+        private const string FISH_CONFIGURATION_DIRECTORY_NAME = "fish";
         private const string FISH_CONFIGURATION_FILE_NAME = "config.fish";
         private const string ZDOTDIR_ENVIRONMENT_VARIABLE = "ZDOTDIR";
+        private const string XDG_CONFIG_HOME_ENVIRONMENT_VARIABLE = "XDG_CONFIG_HOME";
         private const string HOME_REFERENCE = "$HOME";
         private const string PATH_ENVIRONMENT_VARIABLE_NAME = "PATH";
         private const string FISH_ADD_PATH_COMMAND = "fish_add_path";
@@ -72,7 +75,8 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 homeDirectory,
                 zDotDirectory,
                 installDirectory,
-                File.Exists);
+                File.Exists,
+                Environment.GetEnvironmentVariable(XDG_CONFIG_HOME_ENVIRONMENT_VARIABLE));
         }
 
         internal static CliPathSetupPlan BuildPosixPlan(
@@ -80,7 +84,8 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             string homeDirectory,
             string zDotDirectory,
             string installDirectory,
-            Func<string, bool> fileExists = null)
+            Func<string, bool> fileExists = null,
+            string xdgConfigDirectory = null)
         {
             Debug.Assert(!string.IsNullOrWhiteSpace(installDirectory), "installDirectory must not be null or empty");
 
@@ -120,11 +125,12 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             if (string.Equals(shellName, "fish", StringComparison.Ordinal))
             {
+                string fishConfigurationRoot = ResolveFishConfigurationRoot(resolvedHomeDirectory, xdgConfigDirectory);
                 string configurationPath = Path.Combine(
-                    resolvedHomeDirectory,
-                    FISH_CONFIGURATION_DIRECTORY,
+                    fishConfigurationRoot,
+                    FISH_CONFIGURATION_DIRECTORY_NAME,
                     FISH_CONFIGURATION_FILE_NAME);
-                string configurationLine = $"fish_add_path \"{profileInstallDirectory}\"";
+                string configurationLine = $"fish_add_path \"{EscapeFishDoubleQuotedPathValue(profileInstallDirectory)}\"";
                 return BuildSupportedPlan(
                     CliPathSetupShellKind.Fish,
                     shellName,
@@ -302,19 +308,41 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
         private static string[] BuildPathReferenceCandidates(CliPathSetupPlan plan)
         {
+            List<string> candidates = new List<string>();
             if (!plan.ProfileInstallDirectory.StartsWith(HOME_REFERENCE + "/", StringComparison.Ordinal))
             {
-                return new[] { plan.InstallDirectory, plan.ProfileInstallDirectory };
+                AddPathReferenceCandidate(candidates, plan.InstallDirectory);
+                AddPathReferenceCandidate(candidates, plan.ProfileInstallDirectory);
+                return candidates.ToArray();
             }
 
             string homeRelativeSuffix = plan.ProfileInstallDirectory.Substring(HOME_REFERENCE.Length);
-            return new[]
+            AddPathReferenceCandidate(candidates, plan.InstallDirectory);
+            AddPathReferenceCandidate(candidates, plan.ProfileInstallDirectory);
+            AddPathReferenceCandidate(candidates, "${HOME}" + homeRelativeSuffix);
+            AddPathReferenceCandidate(candidates, "~" + homeRelativeSuffix);
+            return candidates.ToArray();
+        }
+
+        private static void AddPathReferenceCandidate(List<string> candidates, string value)
+        {
+            Debug.Assert(candidates != null, "candidates must not be null");
+
+            if (string.IsNullOrWhiteSpace(value))
             {
-                plan.InstallDirectory,
-                plan.ProfileInstallDirectory,
-                "${HOME}" + homeRelativeSuffix,
-                "~" + homeRelativeSuffix
-            };
+                return;
+            }
+
+            if (!candidates.Contains(value))
+            {
+                candidates.Add(value);
+            }
+
+            string escapedValue = EscapePosixDoubleQuotedPathValue(value);
+            if (!candidates.Contains(escapedValue))
+            {
+                candidates.Add(escapedValue);
+            }
         }
 
         private static bool StartsPosixPathAssignmentWithReference(string line, string pathReference)
@@ -717,11 +745,69 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return installDirectory;
         }
 
+        private static string ResolveFishConfigurationRoot(string homeDirectory, string xdgConfigDirectory)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(homeDirectory), "homeDirectory must not be null or empty");
+
+            return string.IsNullOrWhiteSpace(xdgConfigDirectory)
+                ? Path.Combine(homeDirectory, DEFAULT_XDG_CONFIGURATION_DIRECTORY)
+                : xdgConfigDirectory;
+        }
+
         private static string BuildPosixExportLine(string installDirectory)
         {
             Debug.Assert(!string.IsNullOrWhiteSpace(installDirectory), "installDirectory must not be null or empty");
 
-            return $"export PATH=\"{installDirectory}:$PATH\"";
+            return $"export PATH=\"{EscapePosixDoubleQuotedPathValue(installDirectory)}:$PATH\"";
+        }
+
+        private static string EscapePosixDoubleQuotedPathValue(string value)
+        {
+            Debug.Assert(value != null, "value must not be null");
+
+            return EscapeDoubleQuotedPathValue(value, preserveLeadingHomeReference: true, escapeBacktick: true);
+        }
+
+        private static string EscapeFishDoubleQuotedPathValue(string value)
+        {
+            Debug.Assert(value != null, "value must not be null");
+
+            return EscapeDoubleQuotedPathValue(value, preserveLeadingHomeReference: true, escapeBacktick: false);
+        }
+
+        private static string EscapeDoubleQuotedPathValue(
+            string value,
+            bool preserveLeadingHomeReference,
+            bool escapeBacktick)
+        {
+            Debug.Assert(value != null, "value must not be null");
+
+            StringBuilder builder = new StringBuilder();
+            int cursor = 0;
+            if (preserveLeadingHomeReference
+                && (string.Equals(value, HOME_REFERENCE, StringComparison.Ordinal)
+                    || value.StartsWith(HOME_REFERENCE + "/", StringComparison.Ordinal)))
+            {
+                builder.Append(HOME_REFERENCE);
+                cursor = HOME_REFERENCE.Length;
+            }
+
+            while (cursor < value.Length)
+            {
+                char character = value[cursor];
+                if (character == '\\'
+                    || character == '"'
+                    || character == '$'
+                    || (escapeBacktick && character == '`'))
+                {
+                    builder.Append('\\');
+                }
+
+                builder.Append(character);
+                cursor++;
+            }
+
+            return builder.ToString();
         }
 
         private static bool NeedsLeadingNewLine(string content)

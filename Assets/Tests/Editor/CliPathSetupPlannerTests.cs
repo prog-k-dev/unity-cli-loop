@@ -139,6 +139,34 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void BuildPosixPlan_WhenFishHasXdgConfigHomeUsesXdgFishConfig()
+        {
+            // Verifies that fish PATH repair writes to the effective XDG config file.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                fileExists: null,
+                xdgConfigDirectory: "/Users/ExampleUser/.xdg");
+
+            Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.xdg/fish/config.fish"));
+        }
+
+        [Test]
+        public void BuildPosixPlan_WhenInstallDirectoryContainsShellMetacharactersEscapesProfileLine()
+        {
+            // Verifies that custom install paths are written as literal PATH entries.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/bin$cash\"quote");
+
+            Assert.That(plan.ConfigurationLine, Is.EqualTo("export PATH=\"$HOME/bin\\$cash\\\"quote:$PATH\""));
+        }
+
+        [Test]
         public void BuildPosixPlan_WhenShellIsUnsupportedDisablesAutomaticApply()
         {
             // Verifies that unknown shells never get guessed file writes.
@@ -289,6 +317,29 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(result.Success, Is.True);
             Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
             Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenEscapedConfigurationLineExistsSkipsAppend()
+        {
+            // Verifies that escaped profile lines remain idempotent for custom install paths.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/bin$cash\"quote");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => plan.ConfigurationLine + "\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
         }
 
         [Test]

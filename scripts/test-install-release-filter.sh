@@ -707,6 +707,38 @@ test_posix_prints_fish_path_setup_command_without_profile_write() {
   assert_file_not_exists "$home_dir/.config/fish/config.fish"
 }
 
+test_posix_prints_fish_path_setup_command_for_xdg_config_home() {
+  work_dir="$TMP_DIR/posix-fish-xdg-path-hint"
+  home_dir="$work_dir/home"
+  xdg_config_home="$work_dir/xdg-config"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    XDG_CONFIG_HOME="$xdg_config_home" \
+    SHELL=/opt/homebrew/bin/fish \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your fish config:"
+  assert_contains "$work_dir/output.txt" "mkdir -p \"$xdg_config_home/fish\" && echo 'fish_add_path \"\$HOME/.local/bin\"' >> \"$xdg_config_home/fish/config.fish\""
+  assert_file_not_exists "$xdg_config_home/fish/config.fish"
+}
+
 test_powershell_latest_skips_prerelease_assets() {
   assert_contains "$ROOT_DIR/scripts/install.ps1" '$LatestBetaVersion = "latest-beta"'
   assert_contains "$ROOT_DIR/scripts/install.ps1" 'if ($ReleaseChannel -eq "stable" -and $Release.prerelease) {'
@@ -794,6 +826,7 @@ test_posix_prints_zsh_path_setup_command_for_effective_zdotdir
 test_posix_prints_bash_path_setup_command_without_profile_write
 test_posix_prints_bash_path_setup_command_for_existing_profile
 test_posix_prints_fish_path_setup_command_without_profile_write
+test_posix_prints_fish_path_setup_command_for_xdg_config_home
 test_powershell_latest_skips_prerelease_assets
 test_git_bash_latest_installs_windows_zip_asset
 test_powershell_installer_avoids_optional_archive_cmdlets

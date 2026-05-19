@@ -109,7 +109,7 @@ print_path_setup_hint() {
       return
       ;;
     fish)
-      profile_dir="$HOME/.config/fish"
+      profile_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish"
       profile_path="$profile_dir/config.fish"
       profile_line="fish_add_path \"$shell_install_dir\""
       echo "Add this to your fish config:"
