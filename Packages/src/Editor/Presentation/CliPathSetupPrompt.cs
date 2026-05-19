@@ -9,14 +9,13 @@ using io.github.hatayama.UnityCliLoop.Application;
 namespace io.github.hatayama.UnityCliLoop.Presentation
 {
     /// <summary>
-    /// Coordinates the explicit user prompt that can update shell PATH setup after native CLI installation.
+    /// Completes shell PATH setup after the user starts native CLI installation from Unity UI.
     /// </summary>
     internal static class CliPathSetupPrompt
     {
         private const string DialogTitle = "Finish uLoop CLI PATH Setup";
-        private const string AddButtonText = "Add to PATH";
-        private const string LaterButtonText = "Later";
         private const string CopyButtonText = "Copy Command";
+        private const string OkButtonText = "OK";
 
         public static async Task ShowAfterInstallIfNeededAsync(RuntimePlatform platform, CancellationToken ct)
         {
@@ -29,7 +28,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             }
 
             CliPathSetupPlan plan = CliSetupApplicationFacade.GetGlobalCliPathSetupPlan(platform);
-            Show(plan);
+            CompletePathSetup(plan);
         }
 
         internal static bool ShouldShowAfterInstall(RuntimePlatform platform, bool isVisibleFromShell)
@@ -54,11 +53,25 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             return "The uLoop CLI was installed, but your terminal cannot find the uloop command yet.\n\n"
                 + $"Detected shell: {shellText}\n"
                 + $"Profile: {plan.ConfigurationFilePath}\n"
-                + $"Line to add: {plan.ConfigurationLine}\n\n"
-                + "Choose Add to PATH to update this profile now. New terminal windows will pick it up automatically.";
+                + $"Line to add: {plan.ConfigurationLine}";
         }
 
-        private static void Show(CliPathSetupPlan plan)
+        internal static string BuildAppliedMessage(CliPathSetupPlan plan)
+        {
+            return "The uLoop CLI was installed and PATH setup was updated.\n\n"
+                + $"Profile: {plan.ConfigurationFilePath}\n"
+                + $"Added: {plan.ConfigurationLine}\n\n"
+                + "Open a new terminal window to use uloop.";
+        }
+
+        internal static string BuildAlreadyConfiguredMessage(CliPathSetupPlan plan)
+        {
+            return "The uLoop CLI was installed and your shell profile already contains the PATH setup.\n\n"
+                + $"Profile: {plan.ConfigurationFilePath}\n\n"
+                + "Open a new terminal window, or source your shell profile in the existing terminal.";
+        }
+
+        private static void CompletePathSetup(CliPathSetupPlan plan)
         {
             if (!plan.CanApplyAutomatically)
             {
@@ -66,22 +79,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 return;
             }
 
-            int choice = EditorUtility.DisplayDialogComplex(
-                DialogTitle,
-                BuildMessage(plan),
-                AddButtonText,
-                LaterButtonText,
-                CopyButtonText);
-            if (choice == 0)
-            {
-                ApplyPathSetup(plan);
-                return;
-            }
-
-            if (choice == 2)
-            {
-                CopyManualCommand(plan.ManualCommand);
-            }
+            ApplyPathSetup(plan);
         }
 
         private static void ShowUnsupportedShellPrompt(CliPathSetupPlan plan)
@@ -90,7 +88,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 DialogTitle,
                 BuildMessage(plan),
                 CopyButtonText,
-                LaterButtonText);
+                OkButtonText);
             if (!copyCommand)
             {
                 return;
@@ -101,7 +99,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
 
         private static void ApplyPathSetup(CliPathSetupPlan plan)
         {
-            CliInstallResult result = CliSetupApplicationFacade.ApplyGlobalCliPathSetup(plan);
+            CliPathSetupApplyResult result = CliSetupApplicationFacade.ApplyGlobalCliPathSetup(plan);
             if (!result.Success)
             {
                 EditorUtility.DisplayDialog(
@@ -112,10 +110,13 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             }
 
             CliSetupApplicationFacade.InvalidateCliCache();
+            string message = result.Status == CliPathSetupApplyStatus.AlreadyConfigured
+                ? BuildAlreadyConfiguredMessage(plan)
+                : BuildAppliedMessage(plan);
             EditorUtility.DisplayDialog(
                 "PATH Setup Complete",
-                "uLoop CLI PATH setup was updated. Open a new terminal window, or source your shell profile in an existing terminal.",
-                "OK");
+                message,
+                OkButtonText);
         }
 
         private static void CopyManualCommand(string manualCommand)

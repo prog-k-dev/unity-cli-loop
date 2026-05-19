@@ -110,9 +110,10 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 nativeCliInstaller);
             CliPathSetupPlan plan = nativeCliInstaller.GetGlobalCliPathSetupPlan(RuntimePlatform.OSXEditor);
 
-            CliInstallResult result = service.ApplyGlobalCliPathSetup(plan);
+            CliPathSetupApplyResult result = service.ApplyGlobalCliPathSetup(plan);
 
             Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
             Assert.That(nativeCliInstaller.AppliedPathSetup, Is.True);
         }
 
@@ -182,15 +183,19 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                     "zsh",
                     true,
                     "/Users/ExampleUser/.local/bin",
+                    "$HOME/.local/bin",
                     "/Users/ExampleUser/.zshrc",
                     "export PATH=\"$HOME/.local/bin:$PATH\"",
                     "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
             }
 
-            public CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+            public CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
             {
                 AppliedPathSetup = true;
-                return new CliInstallResult(true, "");
+                return new CliPathSetupApplyResult(
+                    true,
+                    CliPathSetupApplyStatus.Applied,
+                    "");
             }
 
             public NativeCliInstallCommand GetGlobalCliInstallCommand(

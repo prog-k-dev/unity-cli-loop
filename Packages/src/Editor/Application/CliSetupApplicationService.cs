@@ -50,7 +50,7 @@ namespace io.github.hatayama.UnityCliLoop.Application
         Task<CliInstallResult> InstallGlobalCliAsync(RuntimePlatform platform, string cliReleaseTag, CancellationToken ct);
         Task<CliInstallResult> UninstallGlobalCliAsync(RuntimePlatform platform, CancellationToken ct);
         CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform);
-        CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan);
+        CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan);
         NativeCliInstallCommand GetGlobalCliInstallCommand(
             RuntimePlatform platform,
             string cliReleaseTag,
@@ -179,7 +179,7 @@ namespace io.github.hatayama.UnityCliLoop.Application
             return _nativeCliInstaller.GetGlobalCliPathSetupPlan(platform);
         }
 
-        public CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+        public CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
         {
             return _nativeCliInstaller.ApplyGlobalCliPathSetup(pathSetupPlan);
         }
@@ -298,7 +298,7 @@ namespace io.github.hatayama.UnityCliLoop.Application
             return GetService().GetGlobalCliPathSetupPlan(platform);
         }
 
-        public static CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+        public static CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
         {
             return GetService().ApplyGlobalCliPathSetup(pathSetupPlan);
         }

@@ -105,7 +105,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 path => false);
             int appendCount = 0;
 
-            CliInstallResult result = CliPathSetupPlanner.ApplyPlan(
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
                 plan,
                 path => true,
                 path => "export PATH=\"$HOME/.local/bin:$PATH\"\n",
@@ -113,7 +113,128 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 (path, content) => { appendCount++; });
 
             Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
             Assert.That(appendCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenHomePathUsesBracesSkipsAppend()
+        {
+            // Verifies that existing HOME-based PATH setup avoids duplicate UI writes.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => false);
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"${HOME}/.local/bin:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenHomePathUsesTildeSkipsAppend()
+        {
+            // Verifies that existing tilde PATH setup avoids duplicate UI writes.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => false);
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"~/.local/bin:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenAbsolutePathExistsSkipsAppend()
+        {
+            // Verifies that existing absolute PATH setup avoids duplicate UI writes.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => false);
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"/Users/ExampleUser/.local/bin:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenPathLineIsCommentedAppendsLine()
+        {
+            // Verifies that disabled profile lines are not treated as active PATH setup.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => false);
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "# export PATH=\"$HOME/.local/bin:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenSimilarDirectoryExistsAppendsLine()
+        {
+            // Verifies that sibling directory names do not suppress the required PATH setup.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => false);
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"$HOME/.local/bin-old:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
         }
 
         [Test]
@@ -126,9 +247,9 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 null,
                 "/Users/ExampleUser/.local/bin",
                 path => false);
-            List<string> appendedContent = new();
+            List<string> appendedContent = new List<string>();
 
-            CliInstallResult result = CliPathSetupPlanner.ApplyPlan(
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
                 plan,
                 path => true,
                 path => "# existing",
@@ -136,6 +257,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 (path, content) => appendedContent.Add(content));
 
             Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
             Assert.That(appendedContent, Has.Count.EqualTo(1));
             Assert.That(appendedContent[0], Is.EqualTo("\nexport PATH=\"$HOME/.local/bin:$PATH\"\n"));
         }

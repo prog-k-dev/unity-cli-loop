@@ -1120,7 +1120,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return CliPathSetupPlanner.BuildCurrentUserPlan(platform);
         }
 
-        public CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+        public CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
         {
             return CliPathSetupPlanner.ApplyPlanToFileSystem(pathSetupPlan);
         }

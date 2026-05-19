@@ -36,12 +36,13 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         [Test]
         public void BuildMessage_WhenPlanCanApplyAutomaticallyMentionsProfile()
         {
-            // Verifies that the UI explains the exact file and line before the user clicks Add.
-            CliPathSetupPlan plan = new(
+            // Verifies that supported plan messages can still show the exact file and line.
+            CliPathSetupPlan plan = new CliPathSetupPlan(
                 CliPathSetupShellKind.Zsh,
                 "zsh",
                 true,
                 "/Users/ExampleUser/.local/bin",
+                "$HOME/.local/bin",
                 "/Users/ExampleUser/.zshrc",
                 "export PATH=\"$HOME/.local/bin:$PATH\"",
                 "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
@@ -50,6 +51,46 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
 
             Assert.That(message, Does.Contain("/Users/ExampleUser/.zshrc"));
             Assert.That(message, Does.Contain("export PATH=\"$HOME/.local/bin:$PATH\""));
+        }
+
+        [Test]
+        public void BuildAppliedMessage_MentionsNewTerminal()
+        {
+            // Verifies that automatic UI setup tells users how to use the updated PATH.
+            CliPathSetupPlan plan = new CliPathSetupPlan(
+                CliPathSetupShellKind.Zsh,
+                "zsh",
+                true,
+                "/Users/ExampleUser/.local/bin",
+                "$HOME/.local/bin",
+                "/Users/ExampleUser/.zshrc",
+                "export PATH=\"$HOME/.local/bin:$PATH\"",
+                "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+
+            string message = CliPathSetupPrompt.BuildAppliedMessage(plan);
+
+            Assert.That(message, Does.Contain("PATH setup was updated"));
+            Assert.That(message, Does.Contain("Open a new terminal"));
+        }
+
+        [Test]
+        public void BuildAlreadyConfiguredMessage_MentionsExistingProfile()
+        {
+            // Verifies that existing profile settings do not look like a failed install.
+            CliPathSetupPlan plan = new CliPathSetupPlan(
+                CliPathSetupShellKind.Zsh,
+                "zsh",
+                true,
+                "/Users/ExampleUser/.local/bin",
+                "$HOME/.local/bin",
+                "/Users/ExampleUser/.zshrc",
+                "export PATH=\"$HOME/.local/bin:$PATH\"",
+                "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+
+            string message = CliPathSetupPrompt.BuildAlreadyConfiguredMessage(plan);
+
+            Assert.That(message, Does.Contain("already contains"));
+            Assert.That(message, Does.Contain("source your shell profile"));
         }
     }
 }
