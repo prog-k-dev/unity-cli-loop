@@ -1,7 +1,10 @@
+using System;
 using System.Diagnostics;
+using System.IO;
 
 using NUnit.Framework;
 
+using io.github.hatayama.UnityCliLoop.Application;
 using io.github.hatayama.UnityCliLoop.Infrastructure;
 
 namespace io.github.hatayama.UnityCliLoop.Tests.Editor
@@ -110,13 +113,99 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         public void BuildShellCliDetectionCommand_UsesShortVersionFlag()
         {
             // Verifies that shell detection asks the command itself for its terminal-visible version.
-            string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop");
+            CliPathSetupPlan plan = CreateZshPathSetupPlan();
+
+            string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
 
             Assert.That(command, Does.Contain("command -v uloop"));
             Assert.That(command, Does.Contain("uloop -v"));
             Assert.That(command, Does.Contain("uloop_version_status=$?"));
             Assert.That(command, Does.Contain("__ULOOP_VERSION_STATUS_START__"));
             Assert.That(command, Does.Not.Contain("uloop --version"));
+        }
+
+        [Test]
+        public void BuildShellCliDetectionCommand_SanitizesInheritedInstallPathBeforeChecking()
+        {
+            // Verifies that shell detection does not trust PATH inherited from an already-open Unity process.
+            CliPathSetupPlan plan = CreateZshPathSetupPlan();
+
+            string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
+
+            Assert.That(command, Does.Contain("uloop_install_dir='/Users/ExampleUser/.local/bin'"));
+            Assert.That(command, Does.Contain("awk -v remove=\"$uloop_install_dir\""));
+            Assert.That(
+                command.IndexOf("awk -v remove=\"$uloop_install_dir\"", System.StringComparison.Ordinal),
+                Is.LessThan(command.IndexOf("command -v uloop", System.StringComparison.Ordinal)));
+        }
+
+        [Test]
+        public void BuildShellCliDetectionCommand_SourcesCurrentProfileAfterSanitizingInheritedPath()
+        {
+            // Verifies that click-time checks read the current profile content after removing stale PATH.
+            CliPathSetupPlan plan = CreateZshPathSetupPlan();
+
+            string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
+
+            Assert.That(command, Does.Contain("uloop_profile='/Users/ExampleUser/.zshrc'"));
+            Assert.That(command, Does.Contain(". \"$uloop_profile\""));
+            Assert.That(
+                command.IndexOf(". \"$uloop_profile\"", System.StringComparison.Ordinal),
+                Is.LessThan(command.IndexOf("command -v uloop", System.StringComparison.Ordinal)));
+        }
+
+        [Test]
+        public void BuildShellCliDetectionCommand_WhenInstallDirOnlyInherited_ReturnsMissingDetection()
+        {
+            // Verifies that a Unity process with stale PATH does not make shell detection report success.
+            if (UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsEditor)
+            {
+                Assert.Ignore("POSIX shell detection is not used on Windows.");
+            }
+
+            string tempRoot = Path.Combine(Path.GetTempPath(), "uloop-cli-detection-" + Guid.NewGuid().ToString("N"));
+            string installDirectory = Path.Combine(tempRoot, "bin");
+            string profilePath = Path.Combine(tempRoot, ".zshrc");
+            string executablePath = Path.Combine(installDirectory, "uloop");
+            Directory.CreateDirectory(installDirectory);
+
+            try
+            {
+                File.WriteAllText(
+                    executablePath,
+                    "#!/bin/sh\n"
+                    + "if [ \"$1\" = \"-v\" ]; then\n"
+                    + "  echo 3.0.0-test\n"
+                    + "  exit 0\n"
+                    + "fi\n"
+                    + "exit 1\n");
+                MakeExecutable(executablePath);
+                File.WriteAllText(profilePath, "# PATH intentionally omitted\n");
+
+                CliPathSetupPlan plan = new(
+                    CliPathSetupShellKind.Zsh,
+                    "zsh",
+                    true,
+                    installDirectory,
+                    "$HOME/.local/bin",
+                    profilePath,
+                    "export PATH=\"$HOME/.local/bin:$PATH\"",
+                    "manual command");
+                string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
+                string output = ExecuteShellDetectionCommand(
+                    command,
+                    installDirectory + ":/usr/bin:/bin");
+
+                CliInstallationDetection detection =
+                    CliInstallationDetector.ParseShellCliInstallationOutput(output);
+
+                Assert.That(detection.Version, Is.Null);
+                Assert.That(detection.ExecutablePath, Is.Null);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(tempRoot);
+            }
         }
 
         [Test]
@@ -218,6 +307,77 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+        }
+
+        private static CliPathSetupPlan CreateZshPathSetupPlan()
+        {
+            return new CliPathSetupPlan(
+                CliPathSetupShellKind.Zsh,
+                "zsh",
+                true,
+                "/Users/ExampleUser/.local/bin",
+                "$HOME/.local/bin",
+                "/Users/ExampleUser/.zshrc",
+                "export PATH=\"$HOME/.local/bin:$PATH\"",
+                "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+        }
+
+        private static string ExecuteShellDetectionCommand(string command, string path)
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = "/bin/sh",
+                Arguments = "-c " + QuoteProcessArgument(command),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            startInfo.EnvironmentVariables["PATH"] = path;
+
+            using Process process = Process.Start(startInfo);
+            bool exited = process.WaitForExit(5000);
+            if (!exited)
+            {
+                CliInstallationDetector.KillProcessIfRunning(process);
+                Assert.Fail("Shell detection command timed out.");
+            }
+
+            return process.StandardOutput.ReadToEnd();
+        }
+
+        private static void MakeExecutable(string executablePath)
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = "/bin/chmod",
+                Arguments = "+x " + QuoteProcessArgument(executablePath),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using Process process = Process.Start(startInfo);
+            bool exited = process.WaitForExit(5000);
+
+            Assert.That(exited, Is.True);
+            Assert.That(process.ExitCode, Is.EqualTo(0));
+        }
+
+        private static string QuoteProcessArgument(string value)
+        {
+            return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
+
+        private static void DeleteDirectoryIfExists(string directory)
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            Directory.Delete(directory, true);
         }
     }
 }

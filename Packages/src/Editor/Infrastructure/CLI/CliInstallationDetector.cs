@@ -162,7 +162,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         {
             if (platform != RuntimePlatform.WindowsEditor)
             {
-                return DetectShellCliInstallationFromLoginShell(ct);
+                return DetectShellCliInstallationFromLoginShell(platform, ct);
             }
 
             string executablePath = NodeEnvironmentResolver.FindExecutablePathAtPlatform(
@@ -171,13 +171,16 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return DetectCliInstallationAtExecutablePath(executablePath, ct);
         }
 
-        private static CliInstallationDetection DetectShellCliInstallationFromLoginShell(CancellationToken ct)
+        private static CliInstallationDetection DetectShellCliInstallationFromLoginShell(RuntimePlatform platform, CancellationToken ct)
         {
             string shell = NodeEnvironmentResolver.GetUserShell();
+            CliPathSetupPlan pathSetupPlan = CliPathSetupPlanner.BuildCurrentUserPlan(platform);
             ProcessStartInfo startInfo = new()
             {
                 FileName = shell,
-                Arguments = "-l -i -c " + QuoteProcessArgument(BuildShellCliDetectionCommand(CliConstants.EXECUTABLE_NAME)),
+                Arguments = "-l -i -c " + QuoteProcessArgument(BuildShellCliDetectionCommand(
+                    CliConstants.EXECUTABLE_NAME,
+                    pathSetupPlan)),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -188,16 +191,69 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return ParseShellCliInstallationOutput(output);
         }
 
-        internal static string BuildShellCliDetectionCommand(string executableName)
+        internal static string BuildShellCliDetectionCommand(string executableName, CliPathSetupPlan pathSetupPlan)
         {
             UnityEngine.Debug.Assert(!string.IsNullOrEmpty(executableName), "executableName must not be null or empty");
 
-            return "echo " + SHELL_PATH_START_MARKER + "\n"
+            if (pathSetupPlan.ShellKind == CliPathSetupShellKind.Fish)
+            {
+                return BuildFishShellCliDetectionCommand(executableName, pathSetupPlan);
+            }
+
+            return BuildPosixShellCliDetectionPrelude(pathSetupPlan)
+                + "echo " + SHELL_PATH_START_MARKER + "\n"
                 + "command -v " + executableName + "\n"
                 + "echo " + SHELL_PATH_END_MARKER + "\n"
                 + "echo " + SHELL_VERSION_START_MARKER + "\n"
                 + executableName + " " + CliConstants.SHORT_VERSION_FLAG + "\n"
                 + "uloop_version_status=$?\n"
+                + "echo " + SHELL_VERSION_END_MARKER + "\n"
+                + "echo " + SHELL_VERSION_STATUS_START_MARKER + "\n"
+                + "echo $uloop_version_status\n"
+                + "echo " + SHELL_VERSION_STATUS_END_MARKER;
+        }
+
+        private static string BuildPosixShellCliDetectionPrelude(CliPathSetupPlan pathSetupPlan)
+        {
+            string command = "uloop_install_dir=" + QuotePosixShellValue(pathSetupPlan.InstallDirectory) + "\n"
+                + "PATH=$(printf '%s' \"$PATH\" | awk -v remove=\"$uloop_install_dir\" 'BEGIN { RS=\":\"; ORS=\"\" } $0 != remove { if (output != \"\") output = output \":\"; output = output $0 } END { print output }')\n"
+                + "export PATH\n";
+            if (pathSetupPlan.CanApplyAutomatically)
+            {
+                command += "uloop_profile=" + QuotePosixShellValue(pathSetupPlan.ConfigurationFilePath) + "\n"
+                    + "if [ -f \"$uloop_profile\" ]; then\n"
+                    + "  . \"$uloop_profile\"\n"
+                    + "fi\n";
+            }
+
+            return command;
+        }
+
+        private static string BuildFishShellCliDetectionCommand(string executableName, CliPathSetupPlan pathSetupPlan)
+        {
+            string command = "set -l uloop_install_dir " + QuoteFishShellValue(pathSetupPlan.InstallDirectory) + "\n"
+                + "set -l uloop_clean_path\n"
+                + "for uloop_path_entry in $PATH\n"
+                + "  if test \"$uloop_path_entry\" != \"$uloop_install_dir\"\n"
+                + "    set uloop_clean_path $uloop_clean_path \"$uloop_path_entry\"\n"
+                + "  end\n"
+                + "end\n"
+                + "set -gx PATH $uloop_clean_path\n";
+            if (pathSetupPlan.CanApplyAutomatically)
+            {
+                command += "set -l uloop_profile " + QuoteFishShellValue(pathSetupPlan.ConfigurationFilePath) + "\n"
+                    + "if test -f \"$uloop_profile\"\n"
+                    + "  source \"$uloop_profile\"\n"
+                    + "end\n";
+            }
+
+            return command
+                + "echo " + SHELL_PATH_START_MARKER + "\n"
+                + "command -v " + executableName + "\n"
+                + "echo " + SHELL_PATH_END_MARKER + "\n"
+                + "echo " + SHELL_VERSION_START_MARKER + "\n"
+                + executableName + " " + CliConstants.SHORT_VERSION_FLAG + "\n"
+                + "set uloop_version_status $status\n"
                 + "echo " + SHELL_VERSION_END_MARKER + "\n"
                 + "echo " + SHELL_VERSION_STATUS_START_MARKER + "\n"
                 + "echo $uloop_version_status\n"
@@ -310,6 +366,18 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             UnityEngine.Debug.Assert(value != null, "value must not be null");
 
             return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
+
+        private static string QuotePosixShellValue(string value)
+        {
+            UnityEngine.Debug.Assert(value != null, "value must not be null");
+            return "'" + value.Replace("'", "'\"'\"'") + "'";
+        }
+
+        private static string QuoteFishShellValue(string value)
+        {
+            UnityEngine.Debug.Assert(value != null, "value must not be null");
+            return "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
         }
 
         private static CliInstallationDetection DetectCliInstallationAtExecutablePath(
