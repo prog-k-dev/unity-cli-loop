@@ -125,24 +125,27 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void BuildShellCliDetectionCommand_SanitizesInheritedInstallPathBeforeChecking()
+        public void BuildShellCliDetectionStartInfo_SanitizesInheritedInstallPathBeforeShellStartup()
         {
             // Verifies that shell detection does not trust PATH inherited from an already-open Unity process.
             CliPathSetupPlan plan = CreateZshPathSetupPlan();
 
-            string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
+            ProcessStartInfo startInfo = CliInstallationDetector.BuildShellCliDetectionStartInfo(
+                "/bin/zsh",
+                UnityEngine.RuntimePlatform.OSXEditor,
+                plan,
+                "/Users/ExampleUser/.local/bin:/usr/bin:/bin");
 
-            Assert.That(command, Does.Contain("uloop_install_dir='/Users/ExampleUser/.local/bin'"));
-            Assert.That(command, Does.Contain("awk -v remove=\"$uloop_install_dir\""));
             Assert.That(
-                command.IndexOf("awk -v remove=\"$uloop_install_dir\"", System.StringComparison.Ordinal),
-                Is.LessThan(command.IndexOf("command -v uloop", System.StringComparison.Ordinal)));
+                startInfo.EnvironmentVariables["PATH"],
+                Is.EqualTo("/usr/bin:/bin"));
+            Assert.That(startInfo.Arguments, Does.Contain("command -v uloop"));
         }
 
         [Test]
-        public void BuildShellCliDetectionCommand_SourcesCurrentProfileAfterSanitizingInheritedPath()
+        public void BuildShellCliDetectionCommand_SourcesCurrentProfileBeforeChecking()
         {
-            // Verifies that click-time checks read the current profile content after removing stale PATH.
+            // Verifies that click-time checks read the current profile content before probing.
             CliPathSetupPlan plan = CreateZshPathSetupPlan();
 
             string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
@@ -155,9 +158,21 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void BuildShellCliDetectionCommand_WhenInstallDirOnlyInherited_ReturnsMissingDetection()
+        public void BuildShellCliDetectionCommand_PreservesLoginProfilePathAdditions()
         {
-            // Verifies that a Unity process with stale PATH does not make shell detection report success.
+            // Verifies that shell startup PATH changes are not removed by the detection command.
+            CliPathSetupPlan plan = CreateZshPathSetupPlan();
+
+            string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
+
+            Assert.That(command, Does.Not.Contain("awk -v remove"));
+            Assert.That(command, Does.Not.Contain("PATH=$(printf"));
+        }
+
+        [Test]
+        public void BuildShellCliDetectionCommand_WhenLoginProfileAddsInstallDir_ReturnsDetection()
+        {
+            // Verifies that PATH added by shell startup remains visible to the probe.
             if (UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsEditor)
             {
                 Assert.Ignore("POSIX shell detection is not used on Windows.");
@@ -199,13 +214,64 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 CliInstallationDetection detection =
                     CliInstallationDetector.ParseShellCliInstallationOutput(output);
 
-                Assert.That(detection.Version, Is.Null);
-                Assert.That(detection.ExecutablePath, Is.Null);
+                Assert.That(detection.Version, Is.EqualTo("3.0.0-test"));
+                Assert.That(detection.ExecutablePath, Is.EqualTo(executablePath));
             }
             finally
             {
                 DeleteDirectoryIfExists(tempRoot);
             }
+        }
+
+        [Test]
+        public void IsShellDetectionUsableForPathSetup_WhenOldCommandShadowsPackageInstall_ReturnsFalse()
+        {
+            // Verifies that a visible but too-old shell command still requires package PATH repair.
+            CliInstallationDetection detection = new(
+                "2.1.1",
+                "/Users/ExampleUser/.npm-global/bin/uloop");
+
+            bool result = CliInstallationDetector.IsShellDetectionUsableForPathSetup(
+                detection,
+                UnityEngine.RuntimePlatform.OSXEditor,
+                (executablePath, platform) => false);
+
+            Assert.That(result, Is.False);
+        }
+
+        [Test]
+        public void IsShellDetectionUsableForPathSetup_WhenPackageCommandResolves_ReturnsTrue()
+        {
+            // Verifies that package-owned shell resolution satisfies PATH repair checks.
+            CliInstallationDetection detection = new(
+                null,
+                "/Users/ExampleUser/.local/bin/uloop");
+
+            bool result = CliInstallationDetector.IsShellDetectionUsableForPathSetup(
+                detection,
+                UnityEngine.RuntimePlatform.OSXEditor,
+                (executablePath, platform) => string.Equals(
+                    executablePath,
+                    "/Users/ExampleUser/.local/bin/uloop",
+                    StringComparison.Ordinal));
+
+            Assert.That(result, Is.True);
+        }
+
+        [Test]
+        public void IsShellDetectionUsableForPathSetup_WhenExternalCommandVersionIsAcceptable_ReturnsTrue()
+        {
+            // Verifies that a compatible external uloop command does not require package PATH repair.
+            CliInstallationDetection detection = new(
+                "3.0.0-beta.9",
+                "/opt/homebrew/bin/uloop");
+
+            bool result = CliInstallationDetector.IsShellDetectionUsableForPathSetup(
+                detection,
+                UnityEngine.RuntimePlatform.OSXEditor,
+                (executablePath, platform) => false);
+
+            Assert.That(result, Is.True);
         }
 
         [Test]

@@ -103,8 +103,10 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 () =>
                 {
                     CliInstallationDetection detection = DetectShellCliInstallationBlocking(platform, ct);
-                    return !string.IsNullOrEmpty(detection.Version)
-                        || !string.IsNullOrEmpty(detection.ExecutablePath);
+                    return IsShellDetectionUsableForPathSetup(
+                        detection,
+                        platform,
+                        NativeCliInstaller.IsPackageOwnedCurrentUserInstallPath);
                 },
                 ct);
         }
@@ -175,6 +177,24 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         {
             string shell = NodeEnvironmentResolver.GetUserShell();
             CliPathSetupPlan pathSetupPlan = CliPathSetupPlanner.BuildCurrentUserPlan(platform);
+            ProcessStartInfo startInfo = BuildShellCliDetectionStartInfo(
+                shell,
+                platform,
+                pathSetupPlan,
+                Environment.GetEnvironmentVariable(CliConstants.POSIX_PATH_ENVIRONMENT_VARIABLE));
+
+            string output = ExecuteAndGetOutput(startInfo, ct);
+            return ParseShellCliInstallationOutput(output);
+        }
+
+        internal static ProcessStartInfo BuildShellCliDetectionStartInfo(
+            string shell,
+            RuntimePlatform platform,
+            CliPathSetupPlan pathSetupPlan,
+            string currentPath)
+        {
+            UnityEngine.Debug.Assert(!string.IsNullOrWhiteSpace(shell), "shell must not be null or empty");
+
             ProcessStartInfo startInfo = new()
             {
                 FileName = shell,
@@ -186,9 +206,33 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            if (platform != RuntimePlatform.WindowsEditor)
+            {
+                startInfo.EnvironmentVariables[CliConstants.POSIX_PATH_ENVIRONMENT_VARIABLE] =
+                    NativeCliInstaller.BuildPathWithoutInstallDirectory(
+                        currentPath,
+                        pathSetupPlan.InstallDirectory,
+                        platform);
+            }
 
-            string output = ExecuteAndGetOutput(startInfo, ct);
-            return ParseShellCliInstallationOutput(output);
+            return startInfo;
+        }
+
+        internal static bool IsShellDetectionUsableForPathSetup(
+            CliInstallationDetection detection,
+            RuntimePlatform platform,
+            Func<string, RuntimePlatform, bool> isPackageOwnedCurrentUserInstallPath)
+        {
+            UnityEngine.Debug.Assert(isPackageOwnedCurrentUserInstallPath != null, "isPackageOwnedCurrentUserInstallPath must not be null");
+
+            if (isPackageOwnedCurrentUserInstallPath(detection.ExecutablePath, platform))
+            {
+                return true;
+            }
+
+            return CliVersionComparer.IsVersionGreaterThanOrEqual(
+                detection.Version,
+                CliConstants.MINIMUM_REQUIRED_CLI_VERSION);
         }
 
         internal static string BuildShellCliDetectionCommand(string executableName, CliPathSetupPlan pathSetupPlan)
@@ -215,9 +259,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
         private static string BuildPosixShellCliDetectionPrelude(CliPathSetupPlan pathSetupPlan)
         {
-            string command = "uloop_install_dir=" + QuotePosixShellValue(pathSetupPlan.InstallDirectory) + "\n"
-                + "PATH=$(printf '%s' \"$PATH\" | awk -v remove=\"$uloop_install_dir\" 'BEGIN { RS=\":\"; ORS=\"\" } $0 != remove { if (output != \"\") output = output \":\"; output = output $0 } END { print output }')\n"
-                + "export PATH\n";
+            string command = "";
             if (pathSetupPlan.CanApplyAutomatically)
             {
                 command += "uloop_profile=" + QuotePosixShellValue(pathSetupPlan.ConfigurationFilePath) + "\n"
@@ -231,14 +273,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
         private static string BuildFishShellCliDetectionCommand(string executableName, CliPathSetupPlan pathSetupPlan)
         {
-            string command = "set -l uloop_install_dir " + QuoteFishShellValue(pathSetupPlan.InstallDirectory) + "\n"
-                + "set -l uloop_clean_path\n"
-                + "for uloop_path_entry in $PATH\n"
-                + "  if test \"$uloop_path_entry\" != \"$uloop_install_dir\"\n"
-                + "    set uloop_clean_path $uloop_clean_path \"$uloop_path_entry\"\n"
-                + "  end\n"
-                + "end\n"
-                + "set -gx PATH $uloop_clean_path\n";
+            string command = "";
             if (pathSetupPlan.CanApplyAutomatically)
             {
                 command += "set -l uloop_profile " + QuoteFishShellValue(pathSetupPlan.ConfigurationFilePath) + "\n"
