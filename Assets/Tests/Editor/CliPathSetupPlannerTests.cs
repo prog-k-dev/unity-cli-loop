@@ -32,6 +32,22 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void BuildPosixPlan_WhenZloginExistsUsesZlogin()
+        {
+            // Verifies that zsh PATH repair survives later login startup resets.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => string.Equals(path, "/Users/ExampleUser/.zlogin", StringComparison.Ordinal));
+
+            Assert.That(plan.ShellKind, Is.EqualTo(CliPathSetupShellKind.Zsh));
+            Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.zlogin"));
+            Assert.That(plan.ManualCommand, Does.Contain(".zlogin"));
+        }
+
+        [Test]
         public void ResolveZshConfigurationRoot_WhenEnvironmentMissingUsesLoginShellRoot()
         {
             // Verifies that zsh profile writes follow the shell's effective ZDOTDIR.
@@ -65,6 +81,52 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void BuildCurrentUserPlan_WhenZshenvSetsZdotdirUsesResolvedZshrc()
+        {
+            // Verifies that the zsh probe preserves newlines and extracts the effective ZDOTDIR path.
+            if (!File.Exists("/bin/zsh"))
+            {
+                Assert.Ignore("zsh is not available on this platform.");
+            }
+
+            string originalHome = Environment.GetEnvironmentVariable("HOME");
+            string originalShell = Environment.GetEnvironmentVariable("SHELL");
+            string originalZDotDirectory = Environment.GetEnvironmentVariable("ZDOTDIR");
+            string originalInstallDirectory = Environment.GetEnvironmentVariable("ULOOP_INSTALL_DIR");
+            string tempRoot = Path.Combine(Path.GetTempPath(), "uloop-zsh-plan-" + Guid.NewGuid().ToString("N"));
+            string homeDirectory = Path.Combine(tempRoot, "home");
+            string zshConfigurationRoot = Path.Combine(homeDirectory, ".config", "zsh");
+            string installDirectory = Path.Combine(homeDirectory, ".local", "bin");
+            Directory.CreateDirectory(zshConfigurationRoot);
+
+            try
+            {
+                File.WriteAllText(
+                    Path.Combine(homeDirectory, ".zshenv"),
+                    "export ZDOTDIR=\"$HOME/.config/zsh\"\n");
+                Environment.SetEnvironmentVariable("HOME", homeDirectory);
+                Environment.SetEnvironmentVariable("SHELL", "/bin/zsh");
+                Environment.SetEnvironmentVariable("ZDOTDIR", null);
+                Environment.SetEnvironmentVariable("ULOOP_INSTALL_DIR", installDirectory);
+
+                CliPathSetupPlan plan = CliPathSetupPlanner.BuildCurrentUserPlan(UnityEngine.RuntimePlatform.OSXEditor);
+
+                Assert.That(plan.ConfigurationFilePath, Is.EqualTo(Path.Combine(zshConfigurationRoot, ".zshrc")));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("HOME", originalHome);
+                Environment.SetEnvironmentVariable("SHELL", originalShell);
+                Environment.SetEnvironmentVariable("ZDOTDIR", originalZDotDirectory);
+                Environment.SetEnvironmentVariable("ULOOP_INSTALL_DIR", originalInstallDirectory);
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, true);
+                }
+            }
+        }
+
+        [Test]
         public void BuildPosixPlan_WhenShellIsBashAndBashProfileExistsUsesBashProfile()
         {
             // Verifies that bash preserves the highest-precedence existing login profile.
@@ -78,6 +140,21 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(plan.ShellKind, Is.EqualTo(CliPathSetupShellKind.Bash));
             Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.bash_profile"));
             Assert.That(plan.ConfigurationLine, Is.EqualTo("export PATH=\"$HOME/.local/bin:$PATH\""));
+        }
+
+        [Test]
+        public void BuildPosixPlan_ManualCommandUsesPrintfWithLeadingNewline()
+        {
+            // Verifies that copied setup commands do not concatenate onto files missing final newlines.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+
+            Assert.That(
+                plan.ManualCommand,
+                Does.Contain("printf '\\n%s\\n' 'export PATH=\"$HOME/.local/bin:$PATH\"'"));
         }
 
         [Test]
@@ -167,6 +244,19 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void BuildPosixPlan_WhenInstallDirectoryContainsQuoteKeepsEscapedProfileInstallDirectory()
+        {
+            // Verifies escaped quotes do not truncate the profile path used by idempotency checks.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/bin$cash\"quote");
+
+            Assert.That(plan.ProfileInstallDirectory, Is.EqualTo("$HOME/bin\\$cash\\\"quote"));
+        }
+
+        [Test]
         public void BuildPosixPlan_WhenShellIsUnsupportedDisablesAutomaticApply()
         {
             // Verifies that unknown shells never get guessed file writes.
@@ -229,9 +319,32 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void ApplyPlan_WhenHomePathUsesTildeSkipsAppend()
+        public void ApplyPlan_WhenHomePathUsesUnquotedTildeSkipsAppend()
         {
             // Verifies that existing tilde PATH setup avoids duplicate UI writes.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=~/.local/bin:$PATH\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenHomePathUsesQuotedTildeAppendsLine()
+        {
+            // Verifies that quoted zsh tilde paths do not block PATH repair.
             CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
                 "/bin/zsh",
                 "/Users/ExampleUser",
@@ -247,8 +360,8 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 (path, content) => { appendCount++; });
 
             Assert.That(result.Success, Is.True);
-            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
-            Assert.That(appendCount, Is.EqualTo(0));
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
         }
 
         [Test]
@@ -461,6 +574,52 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void ApplyPlan_WhenAbsolutePathUsesUnescapedDollarInDoubleQuotesAppendsLine()
+        {
+            // Verifies shell-expanded custom paths do not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/tmp/bin$cash");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"/tmp/bin$cash:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenQuotedInstallDirectoryOnlySharesEscapedPrefixAppendsLine()
+        {
+            // Verifies escaped quote paths are not confused with shorter PATH entries.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/bin$cash\"quote");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"$HOME/bin\\$cash\\:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ApplyPlan_WhenFishAddPathExistsSkipsAppend()
         {
             // Verifies that fish_add_path is treated as an active PATH setup.
@@ -484,6 +643,75 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void ApplyPlan_WhenFishAddPathAppendsInstallDirectoryAppendsLine()
+        {
+            // Verifies that appending fish paths does not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "fish_add_path --append \"$HOME/.local/bin\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenFishAddPathShortAppendFlagAppendsLine()
+        {
+            // Verifies that short fish append flags do not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "fish_add_path -a \"$HOME/.local/bin\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenFishAddPathPrependsOldPathBeforeInstallDirectoryAppendsLine()
+        {
+            // Verifies that shadowing fish_add_path order does not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "fish_add_path /opt/old \"$HOME/.local/bin\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ApplyPlan_WhenFishPathResetShadowsFishAddPathAppendsLine()
         {
             // Verifies that later fish PATH resets can still require PATH repair.
@@ -499,6 +727,52 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 path => true,
                 path => "fish_add_path \"$HOME/.local/bin\"\n"
                     + "set -gx PATH /old/bin $PATH\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenFishSetAppendsInstallDirectoryAppendsLine()
+        {
+            // Verifies that appending fish PATH assignments do not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "set --append PATH \"$HOME/.local/bin\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenFishSetShortAppendFlagAppendsLine()
+        {
+            // Verifies that short fish set append flags do not block PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "set -a PATH \"$HOME/.local/bin\"\n",
                 path => new DirectoryInfo(path),
                 (path, content) => { appendCount++; });
 

@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using UnityEngine;
 
 using io.github.hatayama.UnityCliLoop.Presentation;
 
@@ -30,7 +31,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [TestCase(null, "3.0.0", true, false)]
-        [TestCase("2.9.0", "3.0.0", true, false)]
+        [TestCase("2.9.0", "3.0.0", true, true)]
         [TestCase("3.0.0", "3.0.0", false, false)]
         [TestCase("3.0.0", "3.0.0", true, true)]
         [TestCase("3.1.0", "3.0.0", true, true)]
@@ -45,6 +46,23 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 cliVersion,
                 requiredCliVersion,
                 needsCliPathSetup);
+
+            Assert.That(result, Is.EqualTo(expected));
+        }
+
+        [TestCase(RuntimePlatform.OSXEditor, true, true)]
+        [TestCase(RuntimePlatform.OSXEditor, false, false)]
+        [TestCase(RuntimePlatform.LinuxEditor, true, true)]
+        [TestCase(RuntimePlatform.WindowsEditor, true, false)]
+        public void ShouldCheckCliPathSetupForPlatform_RequiresPackageOwnedCli(
+            RuntimePlatform platform,
+            bool hasPackageOwnedCurrentUserInstall,
+            bool expected)
+        {
+            // Verifies that stale external CLIs do not route the settings button to PATH repair.
+            bool result = UnityCliLoopSettingsWindow.ShouldCheckCliPathSetupForPlatform(
+                platform,
+                hasPackageOwnedCurrentUserInstall);
 
             Assert.That(result, Is.EqualTo(expected));
         }

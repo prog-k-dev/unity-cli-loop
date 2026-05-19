@@ -45,7 +45,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 "$HOME/.local/bin",
                 "/Users/ExampleUser/.zshrc",
                 "export PATH=\"$HOME/.local/bin:$PATH\"",
-                "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+                "printf '\\n%s\\n' 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
 
             string message = CliPathSetupPrompt.BuildMessage(plan);
 
@@ -65,7 +65,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 "$HOME/.local/bin",
                 "/Users/ExampleUser/.zshrc",
                 "export PATH=\"$HOME/.local/bin:$PATH\"",
-                "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+                "printf '\\n%s\\n' 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
 
             string message = CliPathSetupPrompt.BuildAppliedMessage(plan);
 
@@ -85,12 +85,42 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 "$HOME/.local/bin",
                 "/Users/ExampleUser/.zshrc",
                 "export PATH=\"$HOME/.local/bin:$PATH\"",
-                "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+                "printf '\\n%s\\n' 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
 
             string message = CliPathSetupPrompt.BuildAlreadyConfiguredMessage(plan);
 
             Assert.That(message, Does.Contain("already contains"));
             Assert.That(message, Does.Contain("source your shell profile"));
+        }
+
+        [Test]
+        public void ShouldReportPathSetupComplete_WhenShellStillCannotResolveReturnsFalse()
+        {
+            // Verifies that UI success is gated on a fresh shell resolving uloop after repair.
+            bool result = CliPathSetupPrompt.ShouldReportPathSetupComplete(false);
+
+            Assert.That(result, Is.False);
+        }
+
+        [Test]
+        public void BuildStillNotVisibleMessage_MentionsLaterStartupFiles()
+        {
+            // Verifies that ineffective existing PATH lines guide users toward later shell resets.
+            CliPathSetupPlan plan = new CliPathSetupPlan(
+                CliPathSetupShellKind.Zsh,
+                "zsh",
+                true,
+                "/Users/ExampleUser/.local/bin",
+                "$HOME/.local/bin",
+                "/Users/ExampleUser/.zshrc",
+                "export PATH=\"$HOME/.local/bin:$PATH\"",
+                "printf '\\n%s\\n' 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+
+            string message = CliPathSetupPrompt.BuildStillNotVisibleMessage(plan);
+
+            Assert.That(message, Does.Contain("still cannot find"));
+            Assert.That(message, Does.Contain("later shell startup files"));
+            Assert.That(message, Does.Contain(plan.ManualCommand));
         }
     }
 }

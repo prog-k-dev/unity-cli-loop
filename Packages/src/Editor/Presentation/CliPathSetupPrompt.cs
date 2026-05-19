@@ -28,7 +28,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             }
 
             CliPathSetupPlan plan = await CliSetupApplicationFacade.GetGlobalCliPathSetupPlanAsync(platform, ct);
-            CompletePathSetup(plan);
+            await CompletePathSetupAsync(plan, platform, ct);
         }
 
         internal static bool ShouldShowAfterInstall(RuntimePlatform platform, bool isVisibleFromShell)
@@ -71,15 +71,33 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 + "Open a new terminal window, or source your shell profile in the existing terminal.";
         }
 
-        private static void CompletePathSetup(CliPathSetupPlan plan)
+        internal static string BuildStillNotVisibleMessage(CliPathSetupPlan plan)
         {
+            return "PATH setup is present, but a fresh terminal still cannot find the uloop command.\n\n"
+                + $"Profile: {plan.ConfigurationFilePath}\n\n"
+                + "Check later shell startup files that reset PATH, or run this manually:\n"
+                + plan.ManualCommand;
+        }
+
+        internal static bool ShouldReportPathSetupComplete(bool isVisibleFromShellAfterApply)
+        {
+            return isVisibleFromShellAfterApply;
+        }
+
+        private static async Task CompletePathSetupAsync(
+            CliPathSetupPlan plan,
+            RuntimePlatform platform,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+
             if (!plan.CanApplyAutomatically)
             {
                 ShowUnsupportedShellPrompt(plan);
                 return;
             }
 
-            ApplyPathSetup(plan);
+            await ApplyPathSetupAsync(plan, platform, ct);
         }
 
         private static void ShowUnsupportedShellPrompt(CliPathSetupPlan plan)
@@ -97,8 +115,13 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             CopyManualCommand(plan.ManualCommand);
         }
 
-        private static void ApplyPathSetup(CliPathSetupPlan plan)
+        private static async Task ApplyPathSetupAsync(
+            CliPathSetupPlan plan,
+            RuntimePlatform platform,
+            CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
+
             CliPathSetupApplyResult result = CliSetupApplicationFacade.ApplyGlobalCliPathSetup(plan);
             if (!result.Success)
             {
@@ -110,6 +133,16 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             }
 
             CliSetupApplicationFacade.InvalidateCliCache();
+            bool isVisibleFromShell = await CliSetupApplicationFacade.IsCliVisibleFromShellAsync(platform, ct);
+            if (!ShouldReportPathSetupComplete(isVisibleFromShell))
+            {
+                EditorUtility.DisplayDialog(
+                    "PATH Setup Still Needed",
+                    BuildStillNotVisibleMessage(plan),
+                    OkButtonText);
+                return;
+            }
+
             string message = result.Status == CliPathSetupApplyStatus.AlreadyConfigured
                 ? BuildAlreadyConfiguredMessage(plan)
                 : BuildAppliedMessage(plan);

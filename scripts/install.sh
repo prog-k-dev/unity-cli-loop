@@ -6,6 +6,7 @@ INSTALL_DIR="${ULOOP_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${ULOOP_VERSION:-latest}"
 LATEST_VERSION="latest"
 LATEST_BETA_VERSION="latest-beta"
+ZSH_PROFILE_PROBE_TIMEOUT_SECONDS="${ULOOP_ZSH_PROFILE_PROBE_TIMEOUT_SECONDS:-5}"
 
 report_path_shadowing() {
   resolved_uloop=$(command -v uloop 2>/dev/null || true)
@@ -43,6 +44,34 @@ escape_single_quoted_shell_value() {
   printf '%s' "$1" | sed "s/'/'\"'\"'/g"
 }
 
+escape_double_quoted_posix_path_value() {
+  value=$1
+  case "$value" in
+    "\$HOME"|"\$HOME/"*)
+      suffix=${value#"\$HOME"}
+      printf '%s' "\$HOME"
+      printf '%s' "$suffix" | sed 's/["\\$`]/\\&/g'
+      ;;
+    *)
+      printf '%s' "$value" | sed 's/["\\$`]/\\&/g'
+      ;;
+  esac
+}
+
+escape_double_quoted_fish_path_value() {
+  value=$1
+  case "$value" in
+    "\$HOME"|"\$HOME/"*)
+      suffix=${value#"\$HOME"}
+      printf '%s' "\$HOME"
+      printf '%s' "$suffix" | sed 's/["\\$]/\\&/g'
+      ;;
+    *)
+      printf '%s' "$value" | sed 's/["\\$]/\\&/g'
+      ;;
+  esac
+}
+
 extract_marked_first_line() {
   start_marker=$1
   end_marker=$2
@@ -62,24 +91,96 @@ extract_marked_first_line() {
   '
 }
 
+run_zsh_zdotdir_probe_with_timeout() {
+  timeout_command=$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)
+  if [ -n "$timeout_command" ]; then
+    "$timeout_command" "$ZSH_PROFILE_PROBE_TIMEOUT_SECONDS" "$SHELL" "$@" -c 'printf "%s\n" "__ULOOP_ZDOTDIR_START__"; printf "%s\n" "${ZDOTDIR:-$HOME}"; printf "%s\n" "__ULOOP_ZDOTDIR_END__"' </dev/null 2>/dev/null \
+      | extract_marked_first_line "__ULOOP_ZDOTDIR_START__" "__ULOOP_ZDOTDIR_END__" || true
+    return
+  fi
+
+  probe_dir=$(mktemp -d 2>/dev/null || true)
+  if [ -z "$probe_dir" ]; then
+    return
+  fi
+
+  probe_output="$probe_dir/output"
+  probe_done="$probe_dir/done"
+  (
+    "$SHELL" "$@" -c 'printf "%s\n" "__ULOOP_ZDOTDIR_START__"; printf "%s\n" "${ZDOTDIR:-$HOME}"; printf "%s\n" "__ULOOP_ZDOTDIR_END__"' </dev/null >"$probe_output" 2>/dev/null || true
+    : > "$probe_done"
+  ) &
+  probe_pid=$!
+  elapsed_seconds=0
+  while [ ! -f "$probe_done" ]; do
+    if [ "$elapsed_seconds" -ge "$ZSH_PROFILE_PROBE_TIMEOUT_SECONDS" ]; then
+      kill "$probe_pid" 2>/dev/null || true
+      wait "$probe_pid" 2>/dev/null || true
+      rm -rf "$probe_dir"
+      return
+    fi
+
+    sleep 1
+    elapsed_seconds=$((elapsed_seconds + 1))
+  done
+
+  wait "$probe_pid" 2>/dev/null || true
+  extract_marked_first_line "__ULOOP_ZDOTDIR_START__" "__ULOOP_ZDOTDIR_END__" < "$probe_output" || true
+  rm -rf "$probe_dir"
+}
+
+run_zsh_zdotdir_env_probe() {
+  run_zsh_zdotdir_probe_with_timeout
+}
+
+run_zsh_zdotdir_login_probe() {
+  run_zsh_zdotdir_probe_with_timeout -l
+}
+
+run_zsh_zdotdir_probe() {
+  resolved_zdotdir=$(run_zsh_zdotdir_env_probe || true)
+  if [ -n "$resolved_zdotdir" ] && [ "$resolved_zdotdir" != "$HOME" ]; then
+    echo "$resolved_zdotdir"
+    return
+  fi
+
+  login_zdotdir=$(run_zsh_zdotdir_login_probe || true)
+  if [ -n "$login_zdotdir" ]; then
+    echo "$login_zdotdir"
+    return
+  fi
+
+  if [ -n "$resolved_zdotdir" ]; then
+    echo "$resolved_zdotdir"
+  fi
+}
+
 resolve_zsh_profile_path() {
   if [ -n "${ZDOTDIR:-}" ]; then
-    echo "$ZDOTDIR/.zshrc"
+    select_zsh_profile_path "$ZDOTDIR"
     return
   fi
 
   if [ -n "${SHELL:-}" ] && [ -x "$SHELL" ]; then
-    resolved_zdotdir=$(
-      "$SHELL" -l -c 'printf "%s\n" "__ULOOP_ZDOTDIR_START__"; printf "%s\n" "${ZDOTDIR:-$HOME}"; printf "%s\n" "__ULOOP_ZDOTDIR_END__"' </dev/null 2>/dev/null \
-        | extract_marked_first_line "__ULOOP_ZDOTDIR_START__" "__ULOOP_ZDOTDIR_END__" || true
-    )
+    resolved_zdotdir=$(run_zsh_zdotdir_probe || true)
     if [ -n "$resolved_zdotdir" ]; then
-      echo "$resolved_zdotdir/.zshrc"
+      select_zsh_profile_path "$resolved_zdotdir"
       return
     fi
   fi
 
-  echo "$HOME/.zshrc"
+  select_zsh_profile_path "$HOME"
+}
+
+select_zsh_profile_path() {
+  zsh_config_dir=$1
+
+  if [ -f "$zsh_config_dir/.zlogin" ]; then
+    echo "$zsh_config_dir/.zlogin"
+    return
+  fi
+
+  echo "$zsh_config_dir/.zshrc"
 }
 
 resolve_bash_profile_path() {
@@ -100,34 +201,42 @@ print_path_setup_hint() {
   case "$shell_name" in
     zsh)
       profile_path=$(resolve_zsh_profile_path)
-      profile_line="export PATH=\"$shell_install_dir:\$PATH\""
+      profile_install_dir=$(escape_double_quoted_posix_path_value "$shell_install_dir")
+      profile_line="export PATH=\"$profile_install_dir:\$PATH\""
       escaped_profile_line=$(escape_single_quoted_shell_value "$profile_line")
+      escaped_profile_path=$(escape_single_quoted_shell_value "$profile_path")
       echo "Add this to your zsh profile:"
-      echo "  echo '$escaped_profile_line' >> \"$profile_path\" && source \"$profile_path\""
+      printf '%s\n' "  printf '\\n%s\\n' '$escaped_profile_line' >> '$escaped_profile_path' && source '$escaped_profile_path'"
       return
       ;;
     bash)
       profile_path=$(resolve_bash_profile_path)
-      profile_line="export PATH=\"$shell_install_dir:\$PATH\""
+      profile_install_dir=$(escape_double_quoted_posix_path_value "$shell_install_dir")
+      profile_line="export PATH=\"$profile_install_dir:\$PATH\""
       escaped_profile_line=$(escape_single_quoted_shell_value "$profile_line")
+      escaped_profile_path=$(escape_single_quoted_shell_value "$profile_path")
       echo "Add this to your bash profile:"
-      echo "  echo '$escaped_profile_line' >> \"$profile_path\" && source \"$profile_path\""
+      printf '%s\n' "  printf '\\n%s\\n' '$escaped_profile_line' >> '$escaped_profile_path' && source '$escaped_profile_path'"
       return
       ;;
     fish)
       profile_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish"
       profile_path="$profile_dir/config.fish"
-      profile_line="fish_add_path \"$shell_install_dir\""
+      profile_install_dir=$(escape_double_quoted_fish_path_value "$shell_install_dir")
+      profile_line="fish_add_path \"$profile_install_dir\""
       escaped_profile_line=$(escape_single_quoted_shell_value "$profile_line")
+      escaped_profile_dir=$(escape_single_quoted_shell_value "$profile_dir")
+      escaped_profile_path=$(escape_single_quoted_shell_value "$profile_path")
       echo "Add this to your fish config:"
-      echo "  mkdir -p \"$profile_dir\" && echo '$escaped_profile_line' >> \"$profile_path\""
+      printf '%s\n' "  mkdir -p '$escaped_profile_dir' && printf '\\n%s\\n' '$escaped_profile_line' >> '$escaped_profile_path'"
       return
       ;;
   esac
 
   echo "Add $INSTALL_DIR to PATH in your shell profile."
   echo "For POSIX shells, add:"
-  echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+  escaped_install_dir=$(escape_single_quoted_shell_value "$INSTALL_DIR")
+  echo "  export PATH='$escaped_install_dir':\"\$PATH\""
 }
 
 detect_asset_name() {

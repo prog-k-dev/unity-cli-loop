@@ -18,6 +18,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
     internal static class CliPathSetupPlanner
     {
         private const string ZSH_CONFIGURATION_FILE_NAME = ".zshrc";
+        private const string ZSH_LOGIN_CONFIGURATION_FILE_NAME = ".zlogin";
         private const string BASH_PROFILE_FILE_NAME = ".bash_profile";
         private const string BASH_LOGIN_FILE_NAME = ".bash_login";
         private const string POSIX_PROFILE_FILE_NAME = ".profile";
@@ -103,7 +104,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 string configurationRoot = string.IsNullOrWhiteSpace(zDotDirectory)
                     ? resolvedHomeDirectory
                     : zDotDirectory;
-                string configurationPath = Path.Combine(configurationRoot, ZSH_CONFIGURATION_FILE_NAME);
+                string configurationPath = SelectZshConfigurationPath(configurationRoot, resolvedFileExists);
                 string configurationLine = BuildPosixExportLine(profileInstallDirectory);
                 return BuildSupportedPlan(
                     CliPathSetupShellKind.Zsh,
@@ -297,17 +298,37 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             {
                 if (StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND))
                 {
-                    updatedConfigured = ContainsAnyDelimitedPathReference(line, pathReferences);
+                    if (!TryGetFishAddPathValueStart(
+                            trimmedLine,
+                            out int fishAddPathValueStartIndex,
+                            out bool fishAddPathUsesAppendFlag))
+                    {
+                        updatedConfigured = currentConfigured;
+                        return true;
+                    }
+
+                    updatedConfigured = fishAddPathUsesAppendFlag
+                        ? currentConfigured
+                        : IsPathValueConfigured(
+                            trimmedLine,
+                            fishAddPathValueStartIndex,
+                            pathReferences,
+                            currentConfigured);
                     return true;
                 }
 
-                if (TryGetFishPathSetValueStart(trimmedLine, out int fishValueStartIndex))
-                {
-                    updatedConfigured = IsPathValueConfigured(
+                if (TryGetFishPathSetValueStart(
                         trimmedLine,
-                        fishValueStartIndex,
-                        pathReferences,
-                        currentConfigured);
+                        out int fishValueStartIndex,
+                        out bool fishPathSetUsesAppendFlag))
+                {
+                    updatedConfigured = fishPathSetUsesAppendFlag
+                        ? currentConfigured
+                        : IsPathValueConfigured(
+                            trimmedLine,
+                            fishValueStartIndex,
+                            pathReferences,
+                            currentConfigured);
                     return true;
                 }
 
@@ -530,11 +551,15 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return cursor;
         }
 
-        private static bool TryGetFishPathSetValueStart(string line, out int valueStartIndex)
+        private static bool TryGetFishPathSetValueStart(
+            string line,
+            out int valueStartIndex,
+            out bool usesAppendFlag)
         {
             Debug.Assert(line != null, "line must not be null");
 
             valueStartIndex = -1;
+            usesAppendFlag = false;
             if (!StartsWithShellCommand(line, FISH_SET_COMMAND))
             {
                 return false;
@@ -555,7 +580,15 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
                 if (line[cursor] == '-')
                 {
+                    int optionStartIndex = cursor;
                     cursor = SkipShellToken(line, cursor);
+                    string option = line.Substring(optionStartIndex, cursor - optionStartIndex);
+                    if (string.Equals(option, "--append", StringComparison.Ordinal)
+                        || IsFishShortAppendOption(option))
+                    {
+                        usesAppendFlag = true;
+                    }
+
                     continue;
                 }
 
@@ -584,6 +617,68 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return false;
         }
 
+        private static bool TryGetFishAddPathValueStart(
+            string line,
+            out int valueStartIndex,
+            out bool usesAppendFlag)
+        {
+            Debug.Assert(line != null, "line must not be null");
+
+            valueStartIndex = -1;
+            usesAppendFlag = false;
+            int cursor = FISH_ADD_PATH_COMMAND.Length;
+            while (cursor < line.Length)
+            {
+                while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+                {
+                    cursor++;
+                }
+
+                if (cursor >= line.Length || line[cursor] != '-')
+                {
+                    valueStartIndex = cursor;
+                    return true;
+                }
+
+                int optionStartIndex = cursor;
+                cursor = SkipShellToken(line, cursor);
+                string option = line.Substring(optionStartIndex, cursor - optionStartIndex);
+                if (string.Equals(option, "--", StringComparison.Ordinal))
+                {
+                    while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+                    {
+                        cursor++;
+                    }
+
+                    if (cursor >= line.Length)
+                    {
+                        return false;
+                    }
+
+                    valueStartIndex = cursor;
+                    return true;
+                }
+
+                if (string.Equals(option, "--append", StringComparison.Ordinal)
+                    || IsFishShortAppendOption(option))
+                {
+                    usesAppendFlag = true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsFishShortAppendOption(string option)
+        {
+            Debug.Assert(option != null, "option must not be null");
+
+            return option.Length > 1
+                && option[0] == '-'
+                && option[1] != '-'
+                && option.IndexOf('a', 1) >= 0;
+        }
+
         private static int SkipShellToken(string line, int index)
         {
             Debug.Assert(line != null, "line must not be null");
@@ -607,7 +702,12 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             int cursor = valueStartIndex;
             if (cursor < line.Length && (line[cursor] == '"' || line[cursor] == '\''))
             {
+                char quote = line[cursor];
                 cursor++;
+                if (!CanPathReferenceExpandInsideQuote(pathReference, quote))
+                {
+                    return false;
+                }
             }
 
             if (!line.Substring(cursor).StartsWith(pathReference, StringComparison.Ordinal))
@@ -626,6 +726,11 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             int cursor = valueStartIndex;
             if (cursor < line.Length && (line[cursor] == '"' || line[cursor] == '\''))
             {
+                if (line[cursor] == '\'')
+                {
+                    return false;
+                }
+
                 cursor++;
             }
 
@@ -637,6 +742,69 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             return line.Substring(cursor).StartsWith("${PATH}", StringComparison.Ordinal)
                 && IsPathReferenceEndBoundary(line, cursor + "${PATH}".Length);
+        }
+
+        private static bool CanPathReferenceExpandInsideQuote(string pathReference, char quote)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(pathReference), "pathReference must not be null or empty");
+
+            if (pathReference.StartsWith("~", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (quote == '"')
+            {
+                return !ContainsUnescapedDoubleQuoteExpansionCharacter(pathReference);
+            }
+
+            return quote != '\''
+                || (!pathReference.StartsWith(HOME_REFERENCE, StringComparison.Ordinal)
+                    && !pathReference.StartsWith("${HOME}", StringComparison.Ordinal));
+        }
+
+        private static bool ContainsUnescapedDoubleQuoteExpansionCharacter(string pathReference)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(pathReference), "pathReference must not be null or empty");
+
+            int cursor = GetExpansionScanStartIndex(pathReference);
+            while (cursor < pathReference.Length)
+            {
+                if (pathReference[cursor] == '\\' && cursor + 1 < pathReference.Length)
+                {
+                    cursor += 2;
+                    continue;
+                }
+
+                if (pathReference[cursor] == '$'
+                    || pathReference[cursor] == '`'
+                    || pathReference[cursor] == '"')
+                {
+                    return true;
+                }
+
+                cursor++;
+            }
+
+            return false;
+        }
+
+        private static int GetExpansionScanStartIndex(string pathReference)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(pathReference), "pathReference must not be null or empty");
+
+            if (pathReference.StartsWith(HOME_REFERENCE, StringComparison.Ordinal))
+            {
+                return HOME_REFERENCE.Length;
+            }
+
+            const string bracedHomeReference = "${HOME}";
+            if (pathReference.StartsWith(bracedHomeReference, StringComparison.Ordinal))
+            {
+                return bracedHomeReference.Length;
+            }
+
+            return 0;
         }
 
         private static bool ContainsAnyDelimitedPathReference(string line, string[] pathReferences)
@@ -889,6 +1057,20 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return Path.Combine(homeDirectory, BASH_PROFILE_FILE_NAME);
         }
 
+        private static string SelectZshConfigurationPath(string configurationRoot, Func<string, bool> fileExists)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(configurationRoot), "configurationRoot must not be null or empty");
+            Debug.Assert(fileExists != null, "fileExists must not be null");
+
+            string zloginPath = Path.Combine(configurationRoot, ZSH_LOGIN_CONFIGURATION_FILE_NAME);
+            if (fileExists(zloginPath))
+            {
+                return zloginPath;
+            }
+
+            return Path.Combine(configurationRoot, ZSH_CONFIGURATION_FILE_NAME);
+        }
+
         private static CliPathSetupPlan BuildSupportedPlan(
             CliPathSetupShellKind shellKind,
             string shellName,
@@ -918,8 +1100,8 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 return fallbackInstallDirectory;
             }
 
-            int secondQuoteIndex = configurationLine.IndexOf('"', firstQuoteIndex + 1);
-            if (secondQuoteIndex <= firstQuoteIndex)
+            int secondQuoteIndex = FindClosingDoubleQuoteIndex(configurationLine, firstQuoteIndex);
+            if (secondQuoteIndex < 0)
             {
                 return fallbackInstallDirectory;
             }
@@ -934,6 +1116,31 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return quotedValue.Substring(0, pathSeparatorIndex);
         }
 
+        private static int FindClosingDoubleQuoteIndex(string value, int openingQuoteIndex)
+        {
+            Debug.Assert(value != null, "value must not be null");
+            Debug.Assert(openingQuoteIndex >= 0, "openingQuoteIndex must be zero or greater");
+
+            int cursor = openingQuoteIndex + 1;
+            while (cursor < value.Length)
+            {
+                if (value[cursor] == '\\' && cursor + 1 < value.Length)
+                {
+                    cursor += 2;
+                    continue;
+                }
+
+                if (value[cursor] == '"')
+                {
+                    return cursor;
+                }
+
+                cursor++;
+            }
+
+            return -1;
+        }
+
         private static string BuildManualCommand(string configurationPath, string configurationLine)
         {
             Debug.Assert(!string.IsNullOrWhiteSpace(configurationPath), "configurationPath must not be null or empty");
@@ -942,11 +1149,13 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             string configurationDirectory = Path.GetDirectoryName(configurationPath);
             if (string.IsNullOrEmpty(configurationDirectory))
             {
-                return $"echo {QuotePosixShellValue(configurationLine)} >> {QuotePosixShellValue(configurationPath)}";
+                return "printf '\\n%s\\n' "
+                    + $"{QuotePosixShellValue(configurationLine)} >> {QuotePosixShellValue(configurationPath)}";
             }
 
             return $"mkdir -p {QuotePosixShellValue(configurationDirectory)} && "
-                + $"echo {QuotePosixShellValue(configurationLine)} >> {QuotePosixShellValue(configurationPath)}";
+                + "printf '\\n%s\\n' "
+                + $"{QuotePosixShellValue(configurationLine)} >> {QuotePosixShellValue(configurationPath)}";
         }
 
         private static string BuildUnsupportedShellManualCommand(string installDirectory)
@@ -1072,7 +1281,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         private static string QuoteProcessArgument(string value)
         {
             Debug.Assert(value != null, "value must not be null");
-            return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
     }
 }

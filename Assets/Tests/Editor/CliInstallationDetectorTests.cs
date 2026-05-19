@@ -143,18 +143,16 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void BuildShellCliDetectionCommand_SourcesCurrentProfileBeforeChecking()
+        public void BuildShellCliDetectionCommand_ReliesOnShellStartupOrder()
         {
-            // Verifies that click-time checks read the current profile content before probing.
+            // Verifies that shell detection does not source profiles in a different order than real terminals.
             CliPathSetupPlan plan = CreateZshPathSetupPlan();
 
             string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
 
-            Assert.That(command, Does.Contain("uloop_profile='/Users/ExampleUser/.zshrc'"));
-            Assert.That(command, Does.Contain(". \"$uloop_profile\""));
-            Assert.That(
-                command.IndexOf(". \"$uloop_profile\"", System.StringComparison.Ordinal),
-                Is.LessThan(command.IndexOf("command -v uloop", System.StringComparison.Ordinal)));
+            Assert.That(command, Does.Not.Contain("uloop_profile"));
+            Assert.That(command, Does.Not.Contain(". \"$uloop_profile\""));
+            Assert.That(command, Does.Contain("command -v uloop"));
         }
 
         [Test]
@@ -216,6 +214,62 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
 
                 Assert.That(detection.Version, Is.EqualTo("3.0.0-test"));
                 Assert.That(detection.ExecutablePath, Is.EqualTo(executablePath));
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(tempRoot);
+            }
+        }
+
+        [Test]
+        public void BuildShellCliDetectionCommand_WhenZloginResetsPathDoesNotReportProfilePath()
+        {
+            // Verifies that zsh detection matches real login shell order when later hooks reset PATH.
+            if (!File.Exists("/bin/zsh"))
+            {
+                Assert.Ignore("zsh shell detection is not available on this platform.");
+            }
+
+            string tempRoot = Path.Combine(Path.GetTempPath(), "uloop-cli-detection-" + Guid.NewGuid().ToString("N"));
+            string installDirectory = Path.Combine(tempRoot, "bin");
+            string executablePath = Path.Combine(installDirectory, "uloop");
+            Directory.CreateDirectory(installDirectory);
+
+            try
+            {
+                File.WriteAllText(
+                    executablePath,
+                    "#!/bin/sh\n"
+                    + "if [ \"$1\" = \"-v\" ]; then\n"
+                    + "  echo 3.0.0-test\n"
+                    + "  exit 0\n"
+                    + "fi\n"
+                    + "exit 1\n");
+                MakeExecutable(executablePath);
+                File.WriteAllText(Path.Combine(tempRoot, ".zshrc"), "export PATH=\"$HOME/bin:$PATH\"\n");
+                File.WriteAllText(Path.Combine(tempRoot, ".zlogin"), "export PATH=\"/usr/bin:/bin\"\n");
+
+                CliPathSetupPlan plan = new(
+                    CliPathSetupShellKind.Zsh,
+                    "zsh",
+                    true,
+                    installDirectory,
+                    "$HOME/bin",
+                    Path.Combine(tempRoot, ".zshrc"),
+                    "export PATH=\"$HOME/bin:$PATH\"",
+                    "manual command");
+                string command = CliInstallationDetector.BuildShellCliDetectionCommand("uloop", plan);
+                string output = ExecuteLoginShellDetectionCommand(
+                    "/bin/zsh",
+                    command,
+                    tempRoot,
+                    "/usr/bin:/bin");
+
+                CliInstallationDetection detection =
+                    CliInstallationDetector.ParseShellCliInstallationOutput(output);
+
+                Assert.That(detection.Version, Is.Null);
+                Assert.That(detection.ExecutablePath, Is.Null);
             }
             finally
             {
@@ -407,6 +461,35 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             {
                 CliInstallationDetector.KillProcessIfRunning(process);
                 Assert.Fail("Shell detection command timed out.");
+            }
+
+            return process.StandardOutput.ReadToEnd();
+        }
+
+        private static string ExecuteLoginShellDetectionCommand(
+            string shellPath,
+            string command,
+            string homeDirectory,
+            string path)
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = shellPath,
+                Arguments = "-l -i -c " + QuoteProcessArgument(command),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            startInfo.EnvironmentVariables["HOME"] = homeDirectory;
+            startInfo.EnvironmentVariables["PATH"] = path;
+
+            using Process process = Process.Start(startInfo);
+            bool exited = process.WaitForExit(5000);
+            if (!exited)
+            {
+                CliInstallationDetector.KillProcessIfRunning(process);
+                Assert.Fail("Login shell detection command timed out.");
             }
 
             return process.StandardOutput.ReadToEnd();

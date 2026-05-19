@@ -360,6 +360,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         [TestCase(false, false, false, false, false, null, "3.0.0", "Install CLI")]
         [TestCase(true, false, false, false, false, "3.0.0", "3.0.0", "Installed")]
         [TestCase(true, false, false, true, false, "2.9.0", "3.0.0", "Update CLI (v2.9.0 \u2192 v3.0.0)")]
+        [TestCase(true, false, false, true, true, "2.9.0", "3.0.0", "Fix PATH")]
         [TestCase(true, false, false, false, true, "3.0.0", "3.0.0", "Fix PATH")]
         [TestCase(true, true, false, false, false, "3.0.0", "3.0.0", "Installing...")]
         [TestCase(true, true, false, false, true, "3.0.0", "3.0.0", "Fixing PATH...")]
@@ -411,7 +412,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [TestCase(null, "3.0.0", true, false)]
-        [TestCase("2.9.0", "3.0.0", true, false)]
+        [TestCase("2.9.0", "3.0.0", true, true)]
         [TestCase("3.0.0", "3.0.0", false, false)]
         [TestCase("3.0.0", "3.0.0", true, true)]
         [TestCase("3.1.0", "3.0.0", true, true)]
@@ -426,6 +427,25 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 cliVersion,
                 requiredCliVersion,
                 needsCliPathSetup);
+
+            Assert.That(result, Is.EqualTo(expected));
+        }
+
+        [TestCase(RuntimePlatform.OSXEditor, true, true, true)]
+        [TestCase(RuntimePlatform.OSXEditor, true, false, false)]
+        [TestCase(RuntimePlatform.OSXEditor, false, true, false)]
+        [TestCase(RuntimePlatform.WindowsEditor, true, true, false)]
+        public void ShouldCheckCliPathSetupForSetupWizard_RequiresInstalledPackageOwnedCli(
+            RuntimePlatform platform,
+            bool cliInstalled,
+            bool hasPackageOwnedCurrentUserInstall,
+            bool expected)
+        {
+            // Verifies that the setup wizard keeps install/update first when only an external CLI exists.
+            bool result = SetupWizardWindow.ShouldCheckCliPathSetupForSetupWizard(
+                platform,
+                cliInstalled,
+                hasPackageOwnedCurrentUserInstall);
 
             Assert.That(result, Is.EqualTo(expected));
         }

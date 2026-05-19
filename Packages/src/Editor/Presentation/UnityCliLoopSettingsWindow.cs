@@ -344,8 +344,16 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
 
         private static bool ShouldCheckCliPathSetup()
         {
-            return UnityEngine.Application.platform != RuntimePlatform.WindowsEditor
-                && CliSetupApplicationFacade.IsCliInstalled();
+            return ShouldCheckCliPathSetupForPlatform(
+                UnityEngine.Application.platform,
+                CliSetupApplicationFacade.HasPackageOwnedCurrentUserInstall(UnityEngine.Application.platform));
+        }
+
+        internal static bool ShouldCheckCliPathSetupForPlatform(
+            RuntimePlatform platform,
+            bool hasPackageOwnedCurrentUserInstall)
+        {
+            return platform != RuntimePlatform.WindowsEditor && hasPackageOwnedCurrentUserInstall;
         }
 
         private async void HandleRefreshCliVersion()
@@ -628,7 +636,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 || !includeSkillDirectoryChecks;
             bool needsUpdate = IsCliUpdateNeeded(cliVersion, requiredCliVersion);
             bool needsDowngrade = false;
-            bool needsCliPathSetup = isCliInstalled && _needsCliPathSetup && !needsUpdate && !needsDowngrade;
+            bool needsCliPathSetup = isCliInstalled && _needsCliPathSetup;
             bool groupSkillsUnderUnityCliLoop = !_installSkillsFlat;
             SkillInstallState selectedTargetInstallState = includeSkillDirectoryChecks
                 ? _selectedTargetInstallState
@@ -890,8 +898,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 return false;
             }
 
-            bool needsUpdate = IsCliUpdateNeeded(cliVersion, requiredCliVersion);
-            return needsCliPathSetup && !needsUpdate;
+            return needsCliPathSetup;
         }
 
         internal static bool IsCliUpdateNeeded(string cliVersion, string requiredCliVersion)

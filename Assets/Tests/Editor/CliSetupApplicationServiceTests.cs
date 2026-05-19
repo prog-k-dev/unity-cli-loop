@@ -119,6 +119,20 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(nativeCliInstaller.AppliedPathSetup, Is.True);
         }
 
+        [Test]
+        public void HasPackageOwnedCurrentUserInstall_DelegatesToInstaller()
+        {
+            // Verifies that PATH repair only targets an existing package-owned CLI install.
+            FakeNativeCliInstaller nativeCliInstaller = new(true);
+            CliSetupApplicationService service = new(
+                new FakeCliInstallationDetector(new string[] { null }),
+                nativeCliInstaller);
+
+            bool result = service.HasPackageOwnedCurrentUserInstall(RuntimePlatform.OSXEditor);
+
+            Assert.That(result, Is.True);
+        }
+
         private sealed class FakeCliInstallationDetector : ICliInstallationDetector
         {
             private readonly string[] _versions;
@@ -156,12 +170,23 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
 
         private sealed class FakeNativeCliInstaller : INativeCliInstaller
         {
+            private readonly bool _hasPackageOwnedCurrentUserInstall;
             public string InstalledVersion { get; private set; }
             public bool AppliedPathSetup { get; private set; }
+
+            public FakeNativeCliInstaller(bool hasPackageOwnedCurrentUserInstall = false)
+            {
+                _hasPackageOwnedCurrentUserInstall = hasPackageOwnedCurrentUserInstall;
+            }
 
             public bool IsPackageOwnedCurrentUserInstallPath(string cliExecutablePath, RuntimePlatform platform)
             {
                 return false;
+            }
+
+            public bool HasPackageOwnedCurrentUserInstall(RuntimePlatform platform)
+            {
+                return _hasPackageOwnedCurrentUserInstall;
             }
 
             public Task<CliInstallResult> InstallGlobalCliAsync(

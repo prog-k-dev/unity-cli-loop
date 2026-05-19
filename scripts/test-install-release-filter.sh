@@ -567,6 +567,7 @@ test_posix_prints_zsh_path_setup_command_without_profile_write() {
     PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
     ULOOP_VERSION=latest \
     ULOOP_INSTALL_DIR="$install_dir" \
+    ULOOP_ZSH_PROFILE_PROBE_TIMEOUT_SECONDS=1 \
     RELEASES_JSON="$releases_json" \
     CURL_LOG="$curl_log" \
     NPM_LOG="$npm_log" \
@@ -574,7 +575,38 @@ test_posix_prints_zsh_path_setup_command_without_profile_write() {
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
-  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.zshrc\""
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$home_dir/.zshrc'"
+  assert_file_not_exists "$home_dir/.zshrc"
+}
+
+test_posix_prints_zsh_path_setup_command_for_existing_zlogin() {
+  work_dir="$TMP_DIR/posix-zsh-zlogin-path-hint"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+  printf '%s\n' 'export PATH="/usr/bin:/bin"' > "$home_dir/.zlogin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/zsh \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$home_dir/.zlogin'"
   assert_file_not_exists "$home_dir/.zshrc"
 }
 
@@ -604,7 +636,68 @@ test_posix_escapes_single_quotes_in_path_setup_command() {
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   escaped_install_dir=$(printf '%s' "$install_dir" | sed "s/'/'\"'\"'/g")
-  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"$escaped_install_dir:\$PATH\"' >> \"$home_dir/.zshrc\""
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"$escaped_install_dir:\$PATH\"' >> '$home_dir/.zshrc'"
+  assert_file_not_exists "$home_dir/.zshrc"
+}
+
+test_posix_escapes_double_quoted_metacharacters_in_path_setup_command() {
+  work_dir="$TMP_DIR/posix-path-hint-double-quoted-metacharacters"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$work_dir/bin\$cash\"quote\`tick"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/zsh \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  escaped_install_dir=$(printf '%s' "$install_dir" | sed 's/["\\$`]/\\&/g')
+  escaped_profile_line=$(printf '%s' "export PATH=\"$escaped_install_dir:\$PATH\"" | sed "s/'/'\"'\"'/g")
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' '$escaped_profile_line' >> '$home_dir/.zshrc'"
+  assert_file_not_exists "$home_dir/.zshrc"
+}
+
+test_posix_escapes_profile_paths_in_path_setup_command() {
+  work_dir="$TMP_DIR/posix-path-hint-profile-metacharacters"
+  home_dir="$work_dir/home\$cash\"quote\`tick"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/zsh \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  escaped_profile_path=$(printf '%s' "$home_dir/.zshrc" | sed "s/'/'\"'\"'/g")
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$escaped_profile_path' && source '$escaped_profile_path'"
   assert_file_not_exists "$home_dir/.zshrc"
 }
 
@@ -635,6 +728,7 @@ MOCK_ZSH
     PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
     ULOOP_VERSION=latest \
     ULOOP_INSTALL_DIR="$install_dir" \
+    ULOOP_ZSH_PROFILE_PROBE_TIMEOUT_SECONDS=1 \
     RELEASES_JSON="$releases_json" \
     CURL_LOG="$curl_log" \
     NPM_LOG="$npm_log" \
@@ -642,8 +736,96 @@ MOCK_ZSH
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
-  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$zsh_config_dir/.zshrc\""
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$zsh_config_dir/.zshrc'"
   assert_file_not_exists "$zsh_config_dir/.zshrc"
+}
+
+test_posix_zsh_login_probe_runs_when_env_probe_returns_home() {
+  work_dir="$TMP_DIR/posix-zsh-login-zdotdir-path-hint"
+  home_dir="$work_dir/home"
+  zsh_config_dir="$home_dir/.config/zsh"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir" "$zsh_config_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+  cat > "$mock_bin/zsh" <<'MOCK_ZSH'
+#!/bin/sh
+printf '%s\n' "__ULOOP_ZDOTDIR_START__"
+if [ "${1:-}" = "-l" ]; then
+  printf '%s\n' "$HOME/.config/zsh"
+else
+  printf '%s\n' "$HOME"
+fi
+printf '%s\n' "__ULOOP_ZDOTDIR_END__"
+MOCK_ZSH
+  chmod +x "$mock_bin/zsh"
+
+  HOME="$home_dir" \
+    SHELL="$mock_bin/zsh" \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    ULOOP_ZSH_PROFILE_PROBE_TIMEOUT_SECONDS=1 \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$zsh_config_dir/.zshrc'"
+  assert_file_not_exists "$zsh_config_dir/.zshrc"
+}
+
+test_posix_zsh_env_probe_timeout_falls_back_to_home_zshrc() {
+  work_dir="$TMP_DIR/posix-zsh-env-timeout"
+  home_dir="$work_dir/home"
+  zsh_config_dir="$home_dir/.config/zsh"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir" "$zsh_config_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+  cat > "$mock_bin/zsh" <<'MOCK_ZSH'
+#!/bin/sh
+if [ "${1:-}" = "-l" ]; then
+  exit 0
+fi
+
+sleep 3
+printf '%s\n' "__ULOOP_ZDOTDIR_START__"
+printf '%s\n' "$HOME/.config/zsh"
+printf '%s\n' "__ULOOP_ZDOTDIR_END__"
+MOCK_ZSH
+  chmod +x "$mock_bin/zsh"
+
+  HOME="$home_dir" \
+    SHELL="$mock_bin/zsh" \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    ULOOP_ZSH_PROFILE_PROBE_TIMEOUT_SECONDS=1 \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$home_dir/.zshrc'"
+  assert_not_contains "$work_dir/output.txt" "$zsh_config_dir/.zshrc"
+  assert_file_not_exists "$home_dir/.zshrc"
 }
 
 test_posix_zsh_zdotdir_probe_does_not_read_installer_stdin() {
@@ -685,8 +867,57 @@ MOCK_ZSH
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
-  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$zsh_config_dir/.zshrc\""
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$zsh_config_dir/.zshrc'"
   assert_file_not_exists "$zsh_config_dir/.zshrc"
+}
+
+test_posix_zsh_zdotdir_probe_without_output_falls_back_to_home_zshrc() {
+  work_dir="$TMP_DIR/posix-zsh-zdotdir-empty"
+  home_dir="$work_dir/home"
+  zsh_config_dir="$home_dir/.config/zsh"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir" "$zsh_config_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+  cat > "$mock_bin/zsh" <<'MOCK_ZSH'
+#!/bin/sh
+if [ "${1:-}" = "-l" ]; then
+  sleep 3
+  printf '%s\n' "__ULOOP_ZDOTDIR_START__"
+  printf '%s\n' "$HOME/.config/zsh"
+  printf '%s\n' "__ULOOP_ZDOTDIR_END__"
+  exit 0
+fi
+
+printf '%s\n' "__ULOOP_ZDOTDIR_START__"
+printf '%s\n' "$HOME"
+printf '%s\n' "__ULOOP_ZDOTDIR_END__"
+exit 0
+MOCK_ZSH
+  chmod +x "$mock_bin/zsh"
+
+  HOME="$home_dir" \
+    SHELL="$mock_bin/zsh" \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    ULOOP_ZSH_PROFILE_PROBE_TIMEOUT_SECONDS=1 \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$home_dir/.zshrc'"
+  assert_not_contains "$work_dir/output.txt" "$zsh_config_dir/.zshrc"
+  assert_file_not_exists "$home_dir/.zshrc"
 }
 
 test_posix_prints_bash_path_setup_command_without_profile_write() {
@@ -715,7 +946,7 @@ test_posix_prints_bash_path_setup_command_without_profile_write() {
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your bash profile:"
-  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.bash_profile\""
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$home_dir/.bash_profile'"
   assert_file_not_exists "$home_dir/.bash_profile"
 }
 
@@ -746,7 +977,7 @@ test_posix_prints_bash_path_setup_command_for_existing_profile() {
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your bash profile:"
-  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.profile\""
+  assert_contains "$work_dir/output.txt" "printf '\\n%s\\n' 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$home_dir/.profile'"
   assert_file_not_exists "$home_dir/.bash_profile"
 }
 
@@ -776,7 +1007,7 @@ test_posix_prints_fish_path_setup_command_without_profile_write() {
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your fish config:"
-  assert_contains "$work_dir/output.txt" "mkdir -p \"$home_dir/.config/fish\" && echo 'fish_add_path \"\$HOME/.local/bin\"' >> \"$home_dir/.config/fish/config.fish\""
+  assert_contains "$work_dir/output.txt" "mkdir -p '$home_dir/.config/fish' && printf '\\n%s\\n' 'fish_add_path \"\$HOME/.local/bin\"' >> '$home_dir/.config/fish/config.fish'"
   assert_file_not_exists "$home_dir/.config/fish/config.fish"
 }
 
@@ -808,7 +1039,7 @@ test_posix_prints_fish_path_setup_command_for_xdg_config_home() {
     "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
 
   assert_contains "$work_dir/output.txt" "Add this to your fish config:"
-  assert_contains "$work_dir/output.txt" "mkdir -p \"$xdg_config_home/fish\" && echo 'fish_add_path \"\$HOME/.local/bin\"' >> \"$xdg_config_home/fish/config.fish\""
+  assert_contains "$work_dir/output.txt" "mkdir -p '$xdg_config_home/fish' && printf '\\n%s\\n' 'fish_add_path \"\$HOME/.local/bin\"' >> '$xdg_config_home/fish/config.fish'"
   assert_file_not_exists "$xdg_config_home/fish/config.fish"
 }
 
@@ -895,9 +1126,15 @@ test_posix_prints_prefix_manual_cleanup_when_npm_is_unavailable
 test_posix_prints_manual_cleanup_when_npm_prefix_cannot_be_inferred
 test_posix_removes_npm_package_before_replacing_same_bin_path
 test_posix_prints_zsh_path_setup_command_without_profile_write
+test_posix_prints_zsh_path_setup_command_for_existing_zlogin
 test_posix_escapes_single_quotes_in_path_setup_command
+test_posix_escapes_double_quoted_metacharacters_in_path_setup_command
+test_posix_escapes_profile_paths_in_path_setup_command
 test_posix_prints_zsh_path_setup_command_for_effective_zdotdir
+test_posix_zsh_login_probe_runs_when_env_probe_returns_home
+test_posix_zsh_env_probe_timeout_falls_back_to_home_zshrc
 test_posix_zsh_zdotdir_probe_does_not_read_installer_stdin
+test_posix_zsh_zdotdir_probe_without_output_falls_back_to_home_zshrc
 test_posix_prints_bash_path_setup_command_without_profile_write
 test_posix_prints_bash_path_setup_command_for_existing_profile
 test_posix_prints_fish_path_setup_command_without_profile_write

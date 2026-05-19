@@ -680,6 +680,12 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 : GetGlobalCliInstallPath(installDirectory, platform);
         }
 
+        internal static bool HasPackageOwnedCurrentUserInstall(RuntimePlatform platform)
+        {
+            string executablePath = GetCurrentUserGlobalCliInstallPath(platform);
+            return !string.IsNullOrWhiteSpace(executablePath) && File.Exists(executablePath);
+        }
+
         internal static string GetCurrentUserGlobalCliInstallDirectory(RuntimePlatform platform)
         {
             return GetInstallDirectoryForCurrentUser(platform);
@@ -1090,6 +1096,11 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         public bool IsPackageOwnedCurrentUserInstallPath(string cliExecutablePath, RuntimePlatform platform)
         {
             return NativeCliInstaller.IsPackageOwnedCurrentUserInstallPath(cliExecutablePath, platform);
+        }
+
+        public bool HasPackageOwnedCurrentUserInstall(RuntimePlatform platform)
+        {
+            return NativeCliInstaller.HasPackageOwnedCurrentUserInstall(platform);
         }
 
         public Task<CliInstallResult> InstallGlobalCliAsync(

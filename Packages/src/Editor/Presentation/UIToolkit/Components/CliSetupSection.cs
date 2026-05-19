@@ -234,6 +234,11 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 return "Install CLI";
             }
 
+            if (needsCliPathSetup)
+            {
+                return "Fix PATH";
+            }
+
             if (needsUpdate)
             {
                 return $"Update CLI (v{cliVersion} \u2192 v{requiredCliVersion})";
@@ -242,11 +247,6 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             if (needsDowngrade)
             {
                 return $"Downgrade CLI (v{cliVersion} \u2192 v{requiredCliVersion})";
-            }
-
-            if (needsCliPathSetup)
-            {
-                return "Fix PATH";
             }
 
             if (isUninstallAction)

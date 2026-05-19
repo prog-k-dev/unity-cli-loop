@@ -513,7 +513,12 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
 
         private static async Task<bool> ShouldRepairCliPathSetupAsync(bool cliInstalled, CancellationToken ct)
         {
-            if (!cliInstalled || UnityEngine.Application.platform == RuntimePlatform.WindowsEditor)
+            bool hasPackageOwnedCurrentUserInstall =
+                CliSetupApplicationFacade.HasPackageOwnedCurrentUserInstall(UnityEngine.Application.platform);
+            if (!ShouldCheckCliPathSetupForSetupWizard(
+                    UnityEngine.Application.platform,
+                    cliInstalled,
+                    hasPackageOwnedCurrentUserInstall))
             {
                 return false;
             }
@@ -522,6 +527,16 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 UnityEngine.Application.platform,
                 ct);
             return !isCliVisibleFromShell;
+        }
+
+        internal static bool ShouldCheckCliPathSetupForSetupWizard(
+            RuntimePlatform platform,
+            bool cliInstalled,
+            bool hasPackageOwnedCurrentUserInstall)
+        {
+            return cliInstalled
+                && platform != RuntimePlatform.WindowsEditor
+                && hasPackageOwnedCurrentUserInstall;
         }
 
         private List<SkillSetupTargetInfo> DetectDisplayedSkillTargets(string projectRoot)
@@ -660,7 +675,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             bool cliVersionMatched)
         {
             bool needsUpdate = cliInstalled && !cliVersionMatched;
-            bool needsCliPathSetup = cliInstalled && cliVersionMatched && _needsCliPathSetup;
+            bool needsCliPathSetup = cliInstalled && _needsCliPathSetup;
             string buttonText = GetCliButtonTextForSetupWizard(
                 cliInstalled,
                 _isInstallingCli,
@@ -732,14 +747,14 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 return "Install CLI";
             }
 
-            if (needsUpdate)
-            {
-                return $"Update CLI (v{cliVersion} \u2192 v{requiredCliVersion})";
-            }
-
             if (needsCliPathSetup)
             {
                 return "Fix PATH";
+            }
+
+            if (needsUpdate)
+            {
+                return $"Update CLI (v{cliVersion} \u2192 v{requiredCliVersion})";
             }
 
             return "Installed";
@@ -1037,8 +1052,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             string requiredCliVersion,
             bool needsCliPathSetup)
         {
-            bool cliVersionMatched = IsCliVersionSatisfied(cliVersion, requiredCliVersion);
-            return needsCliPathSetup && cliVersionMatched;
+            return cliVersion != null && needsCliPathSetup;
         }
 
         private async Task HandleRepairCliPathSetup()

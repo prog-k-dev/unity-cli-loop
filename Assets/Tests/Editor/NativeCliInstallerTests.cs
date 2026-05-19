@@ -700,5 +700,43 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(result, Is.False);
         }
 
+        [Test]
+        public void HasPackageOwnedCurrentUserInstall_WhenExecutableExistsReturnsTrue()
+        {
+            // Verifies that PATH repair is offered only when the package-owned command can be revealed.
+            string previousInstallDirectory =
+                System.Environment.GetEnvironmentVariable(CliConstants.INSTALL_DIR_ENVIRONMENT_VARIABLE);
+            string tempDirectory = Path.Combine(
+                Path.GetTempPath(),
+                "uloop-native-cli-installer-tests",
+                Path.GetRandomFileName());
+
+            try
+            {
+                Directory.CreateDirectory(tempDirectory);
+                System.Environment.SetEnvironmentVariable(
+                    CliConstants.INSTALL_DIR_ENVIRONMENT_VARIABLE,
+                    tempDirectory);
+                string executablePath = NativeCliInstaller.GetGlobalCliInstallPath(
+                    tempDirectory,
+                    RuntimePlatform.OSXEditor);
+                File.WriteAllText(executablePath, "#!/bin/sh\n");
+
+                bool result = NativeCliInstaller.HasPackageOwnedCurrentUserInstall(RuntimePlatform.OSXEditor);
+
+                Assert.That(result, Is.True);
+            }
+            finally
+            {
+                System.Environment.SetEnvironmentVariable(
+                    CliConstants.INSTALL_DIR_ENVIRONMENT_VARIABLE,
+                    previousInstallDirectory);
+                if (Directory.Exists(tempDirectory))
+                {
+                    Directory.Delete(tempDirectory, true);
+                }
+            }
+        }
+
     }
 }

@@ -47,6 +47,7 @@ namespace io.github.hatayama.UnityCliLoop.Application
     public interface INativeCliInstaller
     {
         bool IsPackageOwnedCurrentUserInstallPath(string cliExecutablePath, RuntimePlatform platform);
+        bool HasPackageOwnedCurrentUserInstall(RuntimePlatform platform);
         Task<CliInstallResult> InstallGlobalCliAsync(RuntimePlatform platform, string cliReleaseTag, CancellationToken ct);
         Task<CliInstallResult> UninstallGlobalCliAsync(RuntimePlatform platform, CancellationToken ct);
         Task<CliPathSetupPlan> GetGlobalCliPathSetupPlanAsync(RuntimePlatform platform, CancellationToken ct);
@@ -131,6 +132,11 @@ namespace io.github.hatayama.UnityCliLoop.Application
             RuntimePlatform platform)
         {
             return _nativeCliInstaller.IsPackageOwnedCurrentUserInstallPath(cliExecutablePath, platform);
+        }
+
+        public bool HasPackageOwnedCurrentUserInstall(RuntimePlatform platform)
+        {
+            return _nativeCliInstaller.HasPackageOwnedCurrentUserInstall(platform);
         }
 
         public bool IsCliVersionLessThan(string leftVersion, string rightVersion)
@@ -265,6 +271,11 @@ namespace io.github.hatayama.UnityCliLoop.Application
             RuntimePlatform platform)
         {
             return GetService().IsPackageOwnedCurrentUserInstallPath(cliExecutablePath, platform);
+        }
+
+        public static bool HasPackageOwnedCurrentUserInstall(RuntimePlatform platform)
+        {
+            return GetService().HasPackageOwnedCurrentUserInstall(platform);
         }
 
         public static bool IsCliVersionLessThan(string leftVersion, string rightVersion)

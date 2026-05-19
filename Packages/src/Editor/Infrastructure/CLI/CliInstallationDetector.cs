@@ -241,11 +241,10 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             if (pathSetupPlan.ShellKind == CliPathSetupShellKind.Fish)
             {
-                return BuildFishShellCliDetectionCommand(executableName, pathSetupPlan);
+                return BuildFishShellCliDetectionCommand(executableName);
             }
 
-            return BuildPosixShellCliDetectionPrelude(pathSetupPlan)
-                + "echo " + SHELL_PATH_START_MARKER + "\n"
+            return "echo " + SHELL_PATH_START_MARKER + "\n"
                 + "command -v " + executableName + "\n"
                 + "echo " + SHELL_PATH_END_MARKER + "\n"
                 + "echo " + SHELL_VERSION_START_MARKER + "\n"
@@ -257,33 +256,9 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 + "echo " + SHELL_VERSION_STATUS_END_MARKER;
         }
 
-        private static string BuildPosixShellCliDetectionPrelude(CliPathSetupPlan pathSetupPlan)
+        private static string BuildFishShellCliDetectionCommand(string executableName)
         {
-            string command = "";
-            if (pathSetupPlan.CanApplyAutomatically)
-            {
-                command += "uloop_profile=" + QuotePosixShellValue(pathSetupPlan.ConfigurationFilePath) + "\n"
-                    + "if [ -f \"$uloop_profile\" ]; then\n"
-                    + "  . \"$uloop_profile\"\n"
-                    + "fi\n";
-            }
-
-            return command;
-        }
-
-        private static string BuildFishShellCliDetectionCommand(string executableName, CliPathSetupPlan pathSetupPlan)
-        {
-            string command = "";
-            if (pathSetupPlan.CanApplyAutomatically)
-            {
-                command += "set -l uloop_profile " + QuoteFishShellValue(pathSetupPlan.ConfigurationFilePath) + "\n"
-                    + "if test -f \"$uloop_profile\"\n"
-                    + "  source \"$uloop_profile\"\n"
-                    + "end\n";
-            }
-
-            return command
-                + "echo " + SHELL_PATH_START_MARKER + "\n"
+            return "echo " + SHELL_PATH_START_MARKER + "\n"
                 + "command -v " + executableName + "\n"
                 + "echo " + SHELL_PATH_END_MARKER + "\n"
                 + "echo " + SHELL_VERSION_START_MARKER + "\n"
@@ -401,18 +376,6 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             UnityEngine.Debug.Assert(value != null, "value must not be null");
 
             return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-        }
-
-        private static string QuotePosixShellValue(string value)
-        {
-            UnityEngine.Debug.Assert(value != null, "value must not be null");
-            return "'" + value.Replace("'", "'\"'\"'") + "'";
-        }
-
-        private static string QuoteFishShellValue(string value)
-        {
-            UnityEngine.Debug.Assert(value != null, "value must not be null");
-            return "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
         }
 
         private static CliInstallationDetection DetectCliInstallationAtExecutablePath(
