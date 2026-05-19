@@ -753,7 +753,12 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
 
         private async void HandleInstallCli()
         {
-            if (ShouldRepairCliPathFromPrimaryButton())
+            await RefreshCliPrimaryActionStateAsync(CancellationToken.None);
+
+            if (ShouldRepairCliPathFromPrimaryButton(
+                    CliSetupApplicationFacade.GetCachedCliVersion(),
+                    GetMinimumRequiredCliVersion(),
+                    _needsCliPathSetup))
             {
                 await HandleRepairCliPathSetup();
                 return;
@@ -799,6 +804,23 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 RefreshAllSections(
                     refreshSkillInstallState:
                     CliInstallRefreshPolicy.ShouldRefreshSkillsAfterCliInstall(wasCliInstalledBeforeInstall));
+            }
+        }
+
+        private async Task RefreshCliPrimaryActionStateAsync(CancellationToken ct)
+        {
+            _isRefreshingVersion = true;
+            RefreshCliSetupSection();
+
+            try
+            {
+                await CliSetupApplicationFacade.ForceRefreshCliVersionAsync(ct);
+                await RefreshCliPathSetupAsync(ct);
+            }
+            finally
+            {
+                _isRefreshingVersion = false;
+                RefreshCliSetupSection();
             }
         }
 
@@ -848,18 +870,6 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 canUninstallCli);
         }
 
-        private bool ShouldRepairCliPathFromPrimaryButton()
-        {
-            string cliVersion = CliSetupApplicationFacade.GetCachedCliVersion();
-            if (cliVersion == null)
-            {
-                return false;
-            }
-
-            bool needsUpdate = IsCliUpdateNeeded(cliVersion, GetMinimumRequiredCliVersion());
-            return _needsCliPathSetup && !needsUpdate;
-        }
-
         internal static bool ShouldUninstallCliFromPrimaryButton(
             string cliVersion,
             string requiredCliVersion,
@@ -868,6 +878,20 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             bool isCliInstalled = cliVersion != null;
             bool needsUpdate = IsCliUpdateNeeded(cliVersion, requiredCliVersion);
             return CliSetupSection.IsUninstallCliAction(isCliInstalled, needsUpdate, needsDowngrade: false, canUninstallCli);
+        }
+
+        internal static bool ShouldRepairCliPathFromPrimaryButton(
+            string cliVersion,
+            string requiredCliVersion,
+            bool needsCliPathSetup)
+        {
+            if (cliVersion == null)
+            {
+                return false;
+            }
+
+            bool needsUpdate = IsCliUpdateNeeded(cliVersion, requiredCliVersion);
+            return needsCliPathSetup && !needsUpdate;
         }
 
         internal static bool IsCliUpdateNeeded(string cliVersion, string requiredCliVersion)

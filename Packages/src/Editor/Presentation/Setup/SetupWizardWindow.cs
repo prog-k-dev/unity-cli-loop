@@ -967,7 +967,12 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
 
         private async void HandleInstallCli()
         {
-            if (ShouldRepairCliPathFromPrimaryButton())
+            await RefreshCliPrimaryActionStateAsync(CancellationToken.None);
+
+            if (ShouldRepairCliPathFromPrimaryButton(
+                    CliSetupApplicationFacade.GetCachedCliVersion(),
+                    GetMinimumRequiredCliVersion(),
+                    _needsCliPathSetup))
             {
                 await HandleRepairCliPathSetup();
                 return;
@@ -1010,12 +1015,30 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             }
         }
 
-        private bool ShouldRepairCliPathFromPrimaryButton()
+        private async Task RefreshCliPrimaryActionStateAsync(CancellationToken ct)
         {
+            _installCliButton.SetEnabled(false);
+            _installCliButton.text = "Checking...";
+
+            await CliSetupApplicationFacade.ForceRefreshCliVersionAsync(ct);
             string cliVersion = CliSetupApplicationFacade.GetCachedCliVersion();
             string requiredCliVersion = GetMinimumRequiredCliVersion();
             bool cliVersionMatched = IsCliVersionSatisfied(cliVersion, requiredCliVersion);
-            return _needsCliPathSetup && cliVersionMatched;
+            _needsCliPathSetup = await ShouldRepairCliPathSetupAsync(IsCliInstalled(cliVersion), ct);
+            UpdateCliStep(
+                IsCliInstalled(cliVersion),
+                cliVersion,
+                requiredCliVersion,
+                cliVersionMatched);
+        }
+
+        internal static bool ShouldRepairCliPathFromPrimaryButton(
+            string cliVersion,
+            string requiredCliVersion,
+            bool needsCliPathSetup)
+        {
+            bool cliVersionMatched = IsCliVersionSatisfied(cliVersion, requiredCliVersion);
+            return needsCliPathSetup && cliVersionMatched;
         }
 
         private async Task HandleRepairCliPathSetup()

@@ -29,6 +29,26 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(result, Is.EqualTo(expected));
         }
 
+        [TestCase(null, "3.0.0", true, false)]
+        [TestCase("2.9.0", "3.0.0", true, false)]
+        [TestCase("3.0.0", "3.0.0", false, false)]
+        [TestCase("3.0.0", "3.0.0", true, true)]
+        [TestCase("3.1.0", "3.0.0", true, true)]
+        public void ShouldRepairCliPathFromPrimaryButton_ReturnsExpectedAction(
+            string cliVersion,
+            string requiredCliVersion,
+            bool needsCliPathSetup,
+            bool expected)
+        {
+            // Verifies that stale terminal PATH state routes to repair before uninstall.
+            bool result = UnityCliLoopSettingsWindow.ShouldRepairCliPathFromPrimaryButton(
+                cliVersion,
+                requiredCliVersion,
+                needsCliPathSetup);
+
+            Assert.That(result, Is.EqualTo(expected));
+        }
+
         [TestCase("3.0.0-beta.0", "3.0.0-beta.1", true)]
         [TestCase("3.0.0-beta.1", "3.0.0-beta.1", false)]
         [TestCase("3.0.0", "3.0.0-beta.1", false)]

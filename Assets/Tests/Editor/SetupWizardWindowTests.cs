@@ -410,6 +410,26 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             Assert.That(enabled, Is.EqualTo(expectedEnabled));
         }
 
+        [TestCase(null, "3.0.0", true, false)]
+        [TestCase("2.9.0", "3.0.0", true, false)]
+        [TestCase("3.0.0", "3.0.0", false, false)]
+        [TestCase("3.0.0", "3.0.0", true, true)]
+        [TestCase("3.1.0", "3.0.0", true, true)]
+        public void ShouldRepairCliPathFromPrimaryButton_ReturnsExpectedAction(
+            string cliVersion,
+            string requiredCliVersion,
+            bool needsCliPathSetup,
+            bool expected)
+        {
+            // Verifies that the setup wizard chooses PATH repair for installed visible-version matches.
+            bool result = SetupWizardWindow.ShouldRepairCliPathFromPrimaryButton(
+                cliVersion,
+                requiredCliVersion,
+                needsCliPathSetup);
+
+            Assert.That(result, Is.EqualTo(expected));
+        }
+
         [Test]
         public void CreateFirstInstallSkillTarget_WhenClaudeSelected_ReturnsClaudeProjectTarget()
         {
