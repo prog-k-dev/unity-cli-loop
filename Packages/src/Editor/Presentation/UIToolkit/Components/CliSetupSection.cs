@@ -216,14 +216,14 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             bool isUninstallAction = IsUninstallCliAction(isCliInstalled, needsUpdate, needsDowngrade, canUninstallCli);
             if (isInstallingCli)
             {
-                if (isUninstallAction)
-                {
-                    return "Uninstalling...";
-                }
-
                 if (needsCliPathSetup)
                 {
                     return "Fixing PATH...";
+                }
+
+                if (isUninstallAction)
+                {
+                    return "Uninstalling...";
                 }
 
                 return "Installing...";
@@ -244,14 +244,14 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 return $"Downgrade CLI (v{cliVersion} \u2192 v{requiredCliVersion})";
             }
 
-            if (isUninstallAction)
-            {
-                return "Uninstall CLI";
-            }
-
             if (needsCliPathSetup)
             {
                 return "Fix PATH";
+            }
+
+            if (isUninstallAction)
+            {
+                return "Uninstall CLI";
             }
 
             return "Install CLI";
