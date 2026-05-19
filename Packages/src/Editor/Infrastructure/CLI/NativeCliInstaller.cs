@@ -1115,9 +1115,10 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             return NativeCliInstaller.GetInstallCommand(platform, cliReleaseTag, removeLegacyLaunchers);
         }
 
-        public CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+        public Task<CliPathSetupPlan> GetGlobalCliPathSetupPlanAsync(RuntimePlatform platform, CancellationToken ct)
         {
-            return CliPathSetupPlanner.BuildCurrentUserPlan(platform);
+            ct.ThrowIfCancellationRequested();
+            return Task.Run(() => CliPathSetupPlanner.BuildCurrentUserPlan(platform), ct);
         }
 
         public CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)

@@ -49,7 +49,7 @@ namespace io.github.hatayama.UnityCliLoop.Application
         bool IsPackageOwnedCurrentUserInstallPath(string cliExecutablePath, RuntimePlatform platform);
         Task<CliInstallResult> InstallGlobalCliAsync(RuntimePlatform platform, string cliReleaseTag, CancellationToken ct);
         Task<CliInstallResult> UninstallGlobalCliAsync(RuntimePlatform platform, CancellationToken ct);
-        CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform);
+        Task<CliPathSetupPlan> GetGlobalCliPathSetupPlanAsync(RuntimePlatform platform, CancellationToken ct);
         CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan);
         NativeCliInstallCommand GetGlobalCliInstallCommand(
             RuntimePlatform platform,
@@ -174,9 +174,10 @@ namespace io.github.hatayama.UnityCliLoop.Application
                 removeLegacyLaunchers);
         }
 
-        public CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+        public Task<CliPathSetupPlan> GetGlobalCliPathSetupPlanAsync(RuntimePlatform platform, CancellationToken ct)
         {
-            return _nativeCliInstaller.GetGlobalCliPathSetupPlan(platform);
+            ct.ThrowIfCancellationRequested();
+            return _nativeCliInstaller.GetGlobalCliPathSetupPlanAsync(platform, ct);
         }
 
         public CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
@@ -293,9 +294,9 @@ namespace io.github.hatayama.UnityCliLoop.Application
             return GetService().GetGlobalCliInstallCommand(platform, removeLegacyLaunchers);
         }
 
-        public static CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+        public static Task<CliPathSetupPlan> GetGlobalCliPathSetupPlanAsync(RuntimePlatform platform, CancellationToken ct)
         {
-            return GetService().GetGlobalCliPathSetupPlan(platform);
+            return GetService().GetGlobalCliPathSetupPlanAsync(platform, ct);
         }
 
         public static CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)

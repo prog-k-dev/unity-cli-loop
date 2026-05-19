@@ -86,7 +86,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void GetGlobalCliPathSetupPlan_DelegatesToInstaller()
+        public async Task GetGlobalCliPathSetupPlanAsync_DelegatesToInstaller()
         {
             // Verifies that UI receives shell-specific PATH setup data through the application service.
             FakeNativeCliInstaller nativeCliInstaller = new();
@@ -94,7 +94,9 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 new FakeCliInstallationDetector(new string[] { null }),
                 nativeCliInstaller);
 
-            CliPathSetupPlan result = service.GetGlobalCliPathSetupPlan(RuntimePlatform.OSXEditor);
+            CliPathSetupPlan result = await service.GetGlobalCliPathSetupPlanAsync(
+                RuntimePlatform.OSXEditor,
+                CancellationToken.None);
 
             Assert.That(result.ShellKind, Is.EqualTo(CliPathSetupShellKind.Zsh));
             Assert.That(result.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.zshrc"));
@@ -108,7 +110,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             CliSetupApplicationService service = new(
                 new FakeCliInstallationDetector(new string[] { null }),
                 nativeCliInstaller);
-            CliPathSetupPlan plan = nativeCliInstaller.GetGlobalCliPathSetupPlan(RuntimePlatform.OSXEditor);
+            CliPathSetupPlan plan = nativeCliInstaller.CreatePathSetupPlan();
 
             CliPathSetupApplyResult result = service.ApplyGlobalCliPathSetup(plan);
 
@@ -176,7 +178,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 return Task.FromResult(new CliInstallResult(true, ""));
             }
 
-            public CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+            public CliPathSetupPlan CreatePathSetupPlan()
             {
                 return new CliPathSetupPlan(
                     CliPathSetupShellKind.Zsh,
@@ -187,6 +189,12 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                     "/Users/ExampleUser/.zshrc",
                     "export PATH=\"$HOME/.local/bin:$PATH\"",
                     "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+            }
+
+            public Task<CliPathSetupPlan> GetGlobalCliPathSetupPlanAsync(RuntimePlatform platform, CancellationToken ct)
+            {
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(CreatePathSetupPlan());
             }
 
             public CliPathSetupApplyResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)

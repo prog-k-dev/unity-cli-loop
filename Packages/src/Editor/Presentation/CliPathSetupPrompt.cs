@@ -27,7 +27,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 return;
             }
 
-            CliPathSetupPlan plan = CliSetupApplicationFacade.GetGlobalCliPathSetupPlan(platform);
+            CliPathSetupPlan plan = await CliSetupApplicationFacade.GetGlobalCliPathSetupPlanAsync(platform, ct);
             CompletePathSetup(plan);
         }
 
