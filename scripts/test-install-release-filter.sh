@@ -294,7 +294,7 @@ write_required_tool_links() {
   tool_bin=$1
   mkdir -p "$tool_bin"
 
-  for command_name in awk cat chmod grep install mkdir mktemp mv readlink rm; do
+  for command_name in awk cat chmod grep install mkdir mktemp mv readlink rm sed; do
     command_path=$(command -v "$command_name")
     {
       printf '%s\n' '#!/bin/sh'
@@ -578,6 +578,36 @@ test_posix_prints_zsh_path_setup_command_without_profile_write() {
   assert_file_not_exists "$home_dir/.zshrc"
 }
 
+test_posix_escapes_single_quotes_in_path_setup_command() {
+  work_dir="$TMP_DIR/posix-path-hint-single-quote"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$work_dir/o'h/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/zsh \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  escaped_install_dir=$(printf '%s' "$install_dir" | sed "s/'/'\"'\"'/g")
+  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"$escaped_install_dir:\$PATH\"' >> \"$home_dir/.zshrc\""
+  assert_file_not_exists "$home_dir/.zshrc"
+}
+
 test_posix_prints_zsh_path_setup_command_for_effective_zdotdir() {
   work_dir="$TMP_DIR/posix-zsh-zdotdir-path-hint"
   home_dir="$work_dir/home"
@@ -822,6 +852,7 @@ test_posix_prints_prefix_manual_cleanup_when_npm_is_unavailable
 test_posix_prints_manual_cleanup_when_npm_prefix_cannot_be_inferred
 test_posix_removes_npm_package_before_replacing_same_bin_path
 test_posix_prints_zsh_path_setup_command_without_profile_write
+test_posix_escapes_single_quotes_in_path_setup_command
 test_posix_prints_zsh_path_setup_command_for_effective_zdotdir
 test_posix_prints_bash_path_setup_command_without_profile_write
 test_posix_prints_bash_path_setup_command_for_existing_profile

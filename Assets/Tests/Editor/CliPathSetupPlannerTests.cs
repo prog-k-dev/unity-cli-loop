@@ -414,6 +414,30 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void ApplyPlan_WhenFishPathResetShadowsFishAddPathAppendsLine()
+        {
+            // Verifies that later fish PATH resets can still require PATH repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/opt/homebrew/bin/fish",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "fish_add_path \"$HOME/.local/bin\"\n"
+                    + "set -gx PATH /old/bin $PATH\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ApplyPlan_WhenPathLineIsCommentedAppendsLine()
         {
             // Verifies that disabled profile lines are not treated as active PATH setup.

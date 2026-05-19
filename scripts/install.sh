@@ -39,6 +39,10 @@ format_install_dir_for_shell_profile() {
   esac
 }
 
+escape_single_quoted_shell_value() {
+  printf '%s' "$1" | sed "s/'/'\"'\"'/g"
+}
+
 extract_marked_first_line() {
   start_marker=$1
   end_marker=$2
@@ -97,23 +101,26 @@ print_path_setup_hint() {
     zsh)
       profile_path=$(resolve_zsh_profile_path)
       profile_line="export PATH=\"$shell_install_dir:\$PATH\""
+      escaped_profile_line=$(escape_single_quoted_shell_value "$profile_line")
       echo "Add this to your zsh profile:"
-      echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""
+      echo "  echo '$escaped_profile_line' >> \"$profile_path\" && source \"$profile_path\""
       return
       ;;
     bash)
       profile_path=$(resolve_bash_profile_path)
       profile_line="export PATH=\"$shell_install_dir:\$PATH\""
+      escaped_profile_line=$(escape_single_quoted_shell_value "$profile_line")
       echo "Add this to your bash profile:"
-      echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""
+      echo "  echo '$escaped_profile_line' >> \"$profile_path\" && source \"$profile_path\""
       return
       ;;
     fish)
       profile_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish"
       profile_path="$profile_dir/config.fish"
       profile_line="fish_add_path \"$shell_install_dir\""
+      escaped_profile_line=$(escape_single_quoted_shell_value "$profile_line")
       echo "Add this to your fish config:"
-      echo "  mkdir -p \"$profile_dir\" && echo '$profile_line' >> \"$profile_path\""
+      echo "  mkdir -p \"$profile_dir\" && echo '$escaped_profile_line' >> \"$profile_path\""
       return
       ;;
   esac

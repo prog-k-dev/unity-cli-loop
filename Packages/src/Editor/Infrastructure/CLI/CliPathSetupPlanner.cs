@@ -29,6 +29,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         private const string HOME_REFERENCE = "$HOME";
         private const string PATH_ENVIRONMENT_VARIABLE_NAME = "PATH";
         private const string FISH_ADD_PATH_COMMAND = "fish_add_path";
+        private const string FISH_SET_COMMAND = "set";
         private const int ZSH_CONFIGURATION_ROOT_PROCESS_TIMEOUT_MS = 5000;
         private const string ZSH_CONFIGURATION_ROOT_START_MARKER = "__ULOOP_ZDOTDIR_START__";
         private const string ZSH_CONFIGURATION_ROOT_END_MARKER = "__ULOOP_ZDOTDIR_END__";
@@ -293,13 +294,23 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             if (shellKind == CliPathSetupShellKind.Fish)
             {
-                if (!StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND))
+                if (StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND))
                 {
-                    return false;
+                    updatedConfigured = ContainsAnyDelimitedPathReference(line, pathReferences);
+                    return true;
                 }
 
-                updatedConfigured = ContainsAnyDelimitedPathReference(line, pathReferences);
-                return true;
+                if (TryGetFishPathSetValueStart(trimmedLine, out int fishValueStartIndex))
+                {
+                    updatedConfigured = IsPathValueConfigured(
+                        trimmedLine,
+                        fishValueStartIndex,
+                        pathReferences,
+                        currentConfigured);
+                    return true;
+                }
+
+                return false;
             }
 
             if (!TryGetPosixPathAssignmentValueStart(trimmedLine, out int valueStartIndex))
@@ -307,17 +318,33 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 return false;
             }
 
+            updatedConfigured = IsPathValueConfigured(
+                trimmedLine,
+                valueStartIndex,
+                pathReferences,
+                currentConfigured);
+            return true;
+        }
+
+        private static bool IsPathValueConfigured(
+            string line,
+            int valueStartIndex,
+            string[] pathReferences,
+            bool currentConfigured)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(valueStartIndex >= 0, "valueStartIndex must be zero or greater");
+            Debug.Assert(pathReferences != null, "pathReferences must not be null");
+
             foreach (string pathReference in pathReferences)
             {
-                if (StartsPathValueWithReference(trimmedLine, valueStartIndex, pathReference))
+                if (StartsPathValueWithReference(line, valueStartIndex, pathReference))
                 {
-                    updatedConfigured = true;
                     return true;
                 }
             }
 
-            updatedConfigured = StartsPathValueWithInheritedPath(trimmedLine, valueStartIndex) && currentConfigured;
-            return true;
+            return StartsPathValueWithInheritedPath(line, valueStartIndex) && currentConfigured;
         }
 
         private static string[] BuildPathReferenceCandidates(CliPathSetupPlan plan)
@@ -410,6 +437,74 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             valueStartIndex = cursor;
             return true;
+        }
+
+        private static bool TryGetFishPathSetValueStart(string line, out int valueStartIndex)
+        {
+            Debug.Assert(line != null, "line must not be null");
+
+            valueStartIndex = -1;
+            if (!StartsWithShellCommand(line, FISH_SET_COMMAND))
+            {
+                return false;
+            }
+
+            int cursor = FISH_SET_COMMAND.Length;
+            while (cursor < line.Length)
+            {
+                while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+                {
+                    cursor++;
+                }
+
+                if (cursor >= line.Length)
+                {
+                    return false;
+                }
+
+                if (line[cursor] == '-')
+                {
+                    cursor = SkipShellToken(line, cursor);
+                    continue;
+                }
+
+                int afterPathIndex = cursor + PATH_ENVIRONMENT_VARIABLE_NAME.Length;
+                if (!line.Substring(cursor).StartsWith(PATH_ENVIRONMENT_VARIABLE_NAME, StringComparison.Ordinal)
+                    || !IsShellNameEndBoundary(line, afterPathIndex))
+                {
+                    return false;
+                }
+
+                cursor = afterPathIndex;
+                while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
+                {
+                    cursor++;
+                }
+
+                if (cursor >= line.Length)
+                {
+                    return false;
+                }
+
+                valueStartIndex = cursor;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static int SkipShellToken(string line, int index)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(index >= 0, "index must be zero or greater");
+
+            int cursor = index;
+            while (cursor < line.Length && !char.IsWhiteSpace(line[cursor]))
+            {
+                cursor++;
+            }
+
+            return cursor;
         }
 
         private static bool StartsPathValueWithReference(string line, int valueStartIndex, string pathReference)
