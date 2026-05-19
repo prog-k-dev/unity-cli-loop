@@ -262,48 +262,62 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             string[] pathReferences = BuildPathReferenceCandidates(plan);
             string[] lines = content.Replace("\r\n", "\n").Split('\n');
+            bool isConfigured = false;
             foreach (string line in lines)
             {
-                if (ContainsPathSetupLine(line, pathReferences, plan.ShellKind))
+                if (TryEvaluatePathSetupLine(line, pathReferences, plan.ShellKind, isConfigured, out bool updatedConfigured))
                 {
-                    return true;
+                    isConfigured = updatedConfigured;
                 }
             }
 
-            return false;
+            return isConfigured;
         }
 
-        private static bool ContainsPathSetupLine(
+        private static bool TryEvaluatePathSetupLine(
             string line,
             string[] pathReferences,
-            CliPathSetupShellKind shellKind)
+            CliPathSetupShellKind shellKind,
+            bool currentConfigured,
+            out bool updatedConfigured)
         {
             Debug.Assert(line != null, "line must not be null");
             Debug.Assert(pathReferences != null, "pathReferences must not be null");
 
+            updatedConfigured = currentConfigured;
             string trimmedLine = line.TrimStart();
             if (trimmedLine.StartsWith("#", StringComparison.Ordinal))
             {
                 return false;
             }
 
-            foreach (string pathReference in pathReferences)
+            if (shellKind == CliPathSetupShellKind.Fish)
             {
-                if (!ContainsDelimitedPathReference(line, pathReference))
+                if (!StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND))
                 {
-                    continue;
+                    return false;
                 }
 
-                bool startsWithActiveSetup = shellKind == CliPathSetupShellKind.Fish
-                    ? StartsWithShellCommand(trimmedLine, FISH_ADD_PATH_COMMAND)
-                    : StartsPosixPathAssignmentWithReference(trimmedLine, pathReference);
-                if (startsWithActiveSetup)
+                updatedConfigured = ContainsAnyDelimitedPathReference(line, pathReferences);
+                return true;
+            }
+
+            if (!TryGetPosixPathAssignmentValueStart(trimmedLine, out int valueStartIndex))
+            {
+                return false;
+            }
+
+            foreach (string pathReference in pathReferences)
+            {
+                if (StartsPathValueWithReference(trimmedLine, valueStartIndex, pathReference))
                 {
+                    updatedConfigured = true;
                     return true;
                 }
             }
 
-            return false;
+            updatedConfigured = StartsPathValueWithInheritedPath(trimmedLine, valueStartIndex) && currentConfigured;
+            return true;
         }
 
         private static string[] BuildPathReferenceCandidates(CliPathSetupPlan plan)
@@ -345,9 +359,9 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             }
         }
 
-        private static bool StartsPosixPathAssignmentWithReference(string line, string pathReference)
+        private static bool TryGetPosixPathAssignmentValueStart(string line, out int valueStartIndex)
         {
-            Debug.Assert(!string.IsNullOrWhiteSpace(pathReference), "pathReference must not be null or empty");
+            Debug.Assert(line != null, "line must not be null");
 
             int searchStartIndex = 0;
             while (searchStartIndex < line.Length)
@@ -355,14 +369,14 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 int pathIndex = line.IndexOf(PATH_ENVIRONMENT_VARIABLE_NAME, searchStartIndex, StringComparison.Ordinal);
                 if (pathIndex < 0)
                 {
+                    valueStartIndex = -1;
                     return false;
                 }
 
                 int afterPathIndex = pathIndex + PATH_ENVIRONMENT_VARIABLE_NAME.Length;
                 if (IsShellNameStartBoundary(line, pathIndex - 1)
                     && IsShellNameEndBoundary(line, afterPathIndex)
-                    && TryGetAssignmentValueStartIndex(line, afterPathIndex, out int valueStartIndex)
-                    && StartsPathValueWithReference(line, valueStartIndex, pathReference))
+                    && TryGetAssignmentValueStartIndex(line, afterPathIndex, out valueStartIndex))
                 {
                     return true;
                 }
@@ -370,6 +384,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 searchStartIndex = afterPathIndex;
             }
 
+            valueStartIndex = -1;
             return false;
         }
 
@@ -415,6 +430,43 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             }
 
             return IsPathReferenceEndBoundary(line, cursor + pathReference.Length);
+        }
+
+        private static bool StartsPathValueWithInheritedPath(string line, int valueStartIndex)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(valueStartIndex >= 0, "valueStartIndex must be zero or greater");
+
+            int cursor = valueStartIndex;
+            if (cursor < line.Length && (line[cursor] == '"' || line[cursor] == '\''))
+            {
+                cursor++;
+            }
+
+            if (line.Substring(cursor).StartsWith("$PATH", StringComparison.Ordinal)
+                && IsShellNameEndBoundary(line, cursor + "$PATH".Length))
+            {
+                return true;
+            }
+
+            return line.Substring(cursor).StartsWith("${PATH}", StringComparison.Ordinal)
+                && IsPathReferenceEndBoundary(line, cursor + "${PATH}".Length);
+        }
+
+        private static bool ContainsAnyDelimitedPathReference(string line, string[] pathReferences)
+        {
+            Debug.Assert(line != null, "line must not be null");
+            Debug.Assert(pathReferences != null, "pathReferences must not be null");
+
+            foreach (string pathReference in pathReferences)
+            {
+                if (ContainsDelimitedPathReference(line, pathReference))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool StartsWithShellCommand(string line, string command)

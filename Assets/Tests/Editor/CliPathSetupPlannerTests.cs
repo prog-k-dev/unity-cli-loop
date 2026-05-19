@@ -320,6 +320,54 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void ApplyPlan_WhenLaterPathAssignmentShadowsInstallDirectoryAppendsLine()
+        {
+            // Verifies that later PATH assignments decide whether the profile still needs repair.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+                    + "export PATH=\"$HOME/.npm-global/bin:$PATH\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.Applied));
+            Assert.That(appendCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ApplyPlan_WhenLaterPathAssignmentPreservesInheritedOrderSkipsAppend()
+        {
+            // Verifies that PATH extensions preserving existing order remain idempotent.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin");
+            int appendCount = 0;
+
+            CliPathSetupApplyResult result = CliPathSetupPlanner.ApplyPlan(
+                plan,
+                path => true,
+                path => "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+                    + "export PATH=\"$PATH:/opt/extra/bin\"\n",
+                path => new DirectoryInfo(path),
+                (path, content) => { appendCount++; });
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Status, Is.EqualTo(CliPathSetupApplyStatus.AlreadyConfigured));
+            Assert.That(appendCount, Is.EqualTo(0));
+        }
+
+        [Test]
         public void ApplyPlan_WhenEscapedConfigurationLineExistsSkipsAppend()
         {
             // Verifies that escaped profile lines remain idempotent for custom install paths.

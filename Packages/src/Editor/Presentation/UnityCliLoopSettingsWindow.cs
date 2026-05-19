@@ -755,18 +755,18 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
         {
             await RefreshCliPrimaryActionStateAsync(CancellationToken.None);
 
+            if (ShouldUninstallCliFromPrimaryButton())
+            {
+                await HandleUninstallCli();
+                return;
+            }
+
             if (ShouldRepairCliPathFromPrimaryButton(
                     CliSetupApplicationFacade.GetCachedCliVersion(),
                     GetMinimumRequiredCliVersion(),
                     _needsCliPathSetup))
             {
                 await HandleRepairCliPathSetup();
-                return;
-            }
-
-            if (ShouldUninstallCliFromPrimaryButton())
-            {
-                await HandleUninstallCli();
                 return;
             }
 
