@@ -39,20 +39,70 @@ format_install_dir_for_shell_profile() {
   esac
 }
 
+extract_marked_first_line() {
+  start_marker=$1
+  end_marker=$2
+
+  awk -v start_marker="$start_marker" -v end_marker="$end_marker" '
+    $0 == start_marker {
+      capture = 1
+      next
+    }
+    $0 == end_marker {
+      exit
+    }
+    capture && $0 != "" {
+      print
+      exit
+    }
+  '
+}
+
+resolve_zsh_profile_path() {
+  if [ -n "${ZDOTDIR:-}" ]; then
+    echo "$ZDOTDIR/.zshrc"
+    return
+  fi
+
+  if [ -n "${SHELL:-}" ] && [ -x "$SHELL" ]; then
+    resolved_zdotdir=$(
+      "$SHELL" -l -c 'printf "%s\n" "__ULOOP_ZDOTDIR_START__"; printf "%s\n" "${ZDOTDIR:-$HOME}"; printf "%s\n" "__ULOOP_ZDOTDIR_END__"' 2>/dev/null \
+        | extract_marked_first_line "__ULOOP_ZDOTDIR_START__" "__ULOOP_ZDOTDIR_END__" || true
+    )
+    if [ -n "$resolved_zdotdir" ]; then
+      echo "$resolved_zdotdir/.zshrc"
+      return
+    fi
+  fi
+
+  echo "$HOME/.zshrc"
+}
+
+resolve_bash_profile_path() {
+  for profile_path in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+    if [ -f "$profile_path" ]; then
+      echo "$profile_path"
+      return
+    fi
+  done
+
+  echo "$HOME/.bash_profile"
+}
+
 print_path_setup_hint() {
   shell_name=$(detect_user_shell_name)
   shell_install_dir=$(format_install_dir_for_shell_profile)
 
   case "$shell_name" in
     zsh)
-      profile_path="${ZDOTDIR:-$HOME}/.zshrc"
+      profile_path=$(resolve_zsh_profile_path)
       profile_line="export PATH=\"$shell_install_dir:\$PATH\""
       echo "Add this to your zsh profile:"
       echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""
       return
       ;;
     bash)
-      profile_path="$HOME/.bash_profile"
+      profile_path=$(resolve_bash_profile_path)
       profile_line="export PATH=\"$shell_install_dir:\$PATH\""
       echo "Add this to your bash profile:"
       echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""

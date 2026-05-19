@@ -1,11 +1,13 @@
 using System;
 using System.IO;
 using System.Security;
+using System.Text;
 
 using UnityEngine;
 
 using io.github.hatayama.UnityCliLoop.Application;
 using io.github.hatayama.UnityCliLoop.Domain;
+using io.github.hatayama.UnityCliLoop.ToolContracts;
 
 namespace io.github.hatayama.UnityCliLoop.Infrastructure
 {
@@ -16,12 +18,17 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
     {
         private const string ZSH_CONFIGURATION_FILE_NAME = ".zshrc";
         private const string BASH_PROFILE_FILE_NAME = ".bash_profile";
+        private const string BASH_LOGIN_FILE_NAME = ".bash_login";
+        private const string POSIX_PROFILE_FILE_NAME = ".profile";
         private const string FISH_CONFIGURATION_DIRECTORY = ".config/fish";
         private const string FISH_CONFIGURATION_FILE_NAME = "config.fish";
         private const string ZDOTDIR_ENVIRONMENT_VARIABLE = "ZDOTDIR";
         private const string HOME_REFERENCE = "$HOME";
         private const string PATH_ENVIRONMENT_VARIABLE_NAME = "PATH";
         private const string FISH_ADD_PATH_COMMAND = "fish_add_path";
+        private const int ZSH_CONFIGURATION_ROOT_PROCESS_TIMEOUT_MS = 5000;
+        private const string ZSH_CONFIGURATION_ROOT_START_MARKER = "__ULOOP_ZDOTDIR_START__";
+        private const string ZSH_CONFIGURATION_ROOT_END_MARKER = "__ULOOP_ZDOTDIR_END__";
 
         public static CliPathSetupPlan BuildCurrentUserPlan(RuntimePlatform platform)
         {
@@ -52,18 +59,28 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                     "Windows User PATH is managed by the Windows installer.");
             }
 
-            return BuildPosixPlan(
-                NodeEnvironmentResolver.GetUserShell(),
-                Environment.GetEnvironmentVariable(CliConstants.POSIX_HOME_ENVIRONMENT_VARIABLE),
+            string shellPath = NodeEnvironmentResolver.GetUserShell();
+            string homeDirectory = Environment.GetEnvironmentVariable(CliConstants.POSIX_HOME_ENVIRONMENT_VARIABLE);
+            string zDotDirectory = ResolveZshConfigurationRoot(
+                shellPath,
+                homeDirectory,
                 Environment.GetEnvironmentVariable(ZDOTDIR_ENVIRONMENT_VARIABLE),
-                installDirectory);
+                ResolveZshConfigurationRootFromLoginShell);
+
+            return BuildPosixPlan(
+                shellPath,
+                homeDirectory,
+                zDotDirectory,
+                installDirectory,
+                File.Exists);
         }
 
         internal static CliPathSetupPlan BuildPosixPlan(
             string shellPath,
             string homeDirectory,
             string zDotDirectory,
-            string installDirectory)
+            string installDirectory,
+            Func<string, bool> fileExists = null)
         {
             Debug.Assert(!string.IsNullOrWhiteSpace(installDirectory), "installDirectory must not be null or empty");
 
@@ -72,6 +89,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 : homeDirectory;
             string shellName = GetShellName(shellPath);
             string profileInstallDirectory = FormatInstallDirectoryForProfile(installDirectory, resolvedHomeDirectory);
+            Func<string, bool> resolvedFileExists = fileExists ?? File.Exists;
 
             if (string.Equals(shellName, "zsh", StringComparison.Ordinal))
             {
@@ -90,7 +108,7 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
             if (string.Equals(shellName, "bash", StringComparison.Ordinal))
             {
-                string configurationPath = Path.Combine(resolvedHomeDirectory, BASH_PROFILE_FILE_NAME);
+                string configurationPath = SelectBashConfigurationPath(resolvedHomeDirectory, resolvedFileExists);
                 string configurationLine = BuildPosixExportLine(profileInstallDirectory);
                 return BuildSupportedPlan(
                     CliPathSetupShellKind.Bash,
@@ -124,6 +142,33 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 "",
                 "",
                 $"Add {installDirectory} to {CliConstants.POSIX_PATH_ENVIRONMENT_VARIABLE} in your shell profile.");
+        }
+
+        internal static string ResolveZshConfigurationRoot(
+            string shellPath,
+            string homeDirectory,
+            string environmentZDotDirectory,
+            Func<string, string, string> resolveFromLoginShell)
+        {
+            Debug.Assert(resolveFromLoginShell != null, "resolveFromLoginShell must not be null");
+
+            if (!string.Equals(GetShellName(shellPath), "zsh", StringComparison.Ordinal))
+            {
+                return environmentZDotDirectory;
+            }
+
+            if (!string.IsNullOrWhiteSpace(environmentZDotDirectory))
+            {
+                return environmentZDotDirectory;
+            }
+
+            string resolvedRoot = resolveFromLoginShell(shellPath, homeDirectory);
+            if (!string.IsNullOrWhiteSpace(resolvedRoot))
+            {
+                return resolvedRoot;
+            }
+
+            return homeDirectory;
         }
 
         public static CliPathSetupApplyResult ApplyPlanToFileSystem(CliPathSetupPlan plan)
@@ -414,6 +459,130 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
                 ex.Message);
         }
 
+        private static string ResolveZshConfigurationRootFromLoginShell(string shellPath, string homeDirectory)
+        {
+            if (!string.Equals(GetShellName(shellPath), "zsh", StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(shellPath))
+            {
+                return string.Empty;
+            }
+
+            System.Diagnostics.ProcessStartInfo startInfo = new()
+            {
+                FileName = shellPath,
+                Arguments = "-l -c " + QuoteProcessArgument(BuildZshConfigurationRootProbeCommand()),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            if (!string.IsNullOrWhiteSpace(homeDirectory))
+            {
+                startInfo.EnvironmentVariables[CliConstants.POSIX_HOME_ENVIRONMENT_VARIABLE] = homeDirectory;
+            }
+
+            string output = ExecuteZshConfigurationRootProbe(startInfo);
+            string block = NodeEnvironmentResolver.ExtractBetweenMarkers(
+                output,
+                ZSH_CONFIGURATION_ROOT_START_MARKER,
+                ZSH_CONFIGURATION_ROOT_END_MARKER);
+            return ExtractFirstNonEmptyLine(block);
+        }
+
+        private static string BuildZshConfigurationRootProbeCommand()
+        {
+            return "printf '%s\\n' " + QuotePosixShellValue(ZSH_CONFIGURATION_ROOT_START_MARKER) + "\n"
+                + "printf '%s\\n' \"${ZDOTDIR:-$HOME}\"\n"
+                + "printf '%s\\n' " + QuotePosixShellValue(ZSH_CONFIGURATION_ROOT_END_MARKER);
+        }
+
+        private static string ExecuteZshConfigurationRootProbe(System.Diagnostics.ProcessStartInfo startInfo)
+        {
+            Debug.Assert(startInfo != null, "startInfo must not be null");
+            Debug.Assert(startInfo.RedirectStandardOutput, "RedirectStandardOutput must be true");
+            Debug.Assert(startInfo.RedirectStandardError, "RedirectStandardError must be true");
+
+            System.Diagnostics.Process process = ProcessStartHelper.TryStart(startInfo);
+            if (process == null)
+            {
+                return string.Empty;
+            }
+
+            using (process)
+            {
+                StringBuilder outputBuilder = new StringBuilder();
+                process.OutputDataReceived += (sender, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        outputBuilder.AppendLine(e.Data);
+                    }
+                };
+                process.ErrorDataReceived += (sender, e) => { };
+
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                bool exited = process.WaitForExit(ZSH_CONFIGURATION_ROOT_PROCESS_TIMEOUT_MS);
+                if (!exited)
+                {
+                    CliInstallationDetector.KillProcessIfRunning(process);
+                    return string.Empty;
+                }
+
+                process.WaitForExit();
+                if (process.ExitCode != 0)
+                {
+                    return string.Empty;
+                }
+
+                return outputBuilder.ToString();
+            }
+        }
+
+        private static string ExtractFirstNonEmptyLine(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+            {
+                return string.Empty;
+            }
+
+            string[] lines = content.Replace("\r\n", "\n").Split('\n');
+            foreach (string line in lines)
+            {
+                string trimmedLine = line.Trim();
+                if (!string.IsNullOrEmpty(trimmedLine))
+                {
+                    return trimmedLine;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string SelectBashConfigurationPath(string homeDirectory, Func<string, bool> fileExists)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(homeDirectory), "homeDirectory must not be null or empty");
+            Debug.Assert(fileExists != null, "fileExists must not be null");
+
+            string[] candidateFileNames =
+            {
+                BASH_PROFILE_FILE_NAME,
+                BASH_LOGIN_FILE_NAME,
+                POSIX_PROFILE_FILE_NAME
+            };
+            foreach (string candidateFileName in candidateFileNames)
+            {
+                string candidatePath = Path.Combine(homeDirectory, candidateFileName);
+                if (fileExists(candidatePath))
+                {
+                    return candidatePath;
+                }
+            }
+
+            return Path.Combine(homeDirectory, BASH_PROFILE_FILE_NAME);
+        }
+
         private static CliPathSetupPlan BuildSupportedPlan(
             CliPathSetupShellKind shellKind,
             string shellName,
@@ -525,6 +694,12 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
         {
             Debug.Assert(value != null, "value must not be null");
             return $"'{value.Replace("'", "'\"'\"'")}'";
+        }
+
+        private static string QuoteProcessArgument(string value)
+        {
+            Debug.Assert(value != null, "value must not be null");
+            return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         }
     }
 }

@@ -32,14 +32,48 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void BuildPosixPlan_WhenShellIsBashAndBashrcExistsUsesBashProfile()
+        public void ResolveZshConfigurationRoot_WhenEnvironmentMissingUsesLoginShellRoot()
         {
-            // Verifies that bash targets the profile read by login shells, even when bashrc exists.
+            // Verifies that zsh profile writes follow the shell's effective ZDOTDIR.
+            string result = CliPathSetupPlanner.ResolveZshConfigurationRoot(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                null,
+                (shellPath, homeDirectory) => "/Users/ExampleUser/.config/zsh");
+
+            Assert.That(result, Is.EqualTo("/Users/ExampleUser/.config/zsh"));
+        }
+
+        [Test]
+        public void ResolveZshConfigurationRoot_WhenEnvironmentExistsUsesEnvironmentValue()
+        {
+            // Verifies that exported ZDOTDIR takes precedence over probing the shell again.
+            int resolveCount = 0;
+
+            string result = CliPathSetupPlanner.ResolveZshConfigurationRoot(
+                "/bin/zsh",
+                "/Users/ExampleUser",
+                "/Users/ExampleUser/.zsh",
+                (shellPath, homeDirectory) =>
+                {
+                    resolveCount++;
+                    return "/Users/ExampleUser/.config/zsh";
+                });
+
+            Assert.That(result, Is.EqualTo("/Users/ExampleUser/.zsh"));
+            Assert.That(resolveCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void BuildPosixPlan_WhenShellIsBashAndBashProfileExistsUsesBashProfile()
+        {
+            // Verifies that bash preserves the highest-precedence existing login profile.
             CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
                 "/bin/bash",
                 "/Users/ExampleUser",
                 null,
-                "/Users/ExampleUser/.local/bin");
+                "/Users/ExampleUser/.local/bin",
+                path => string.Equals(path, "/Users/ExampleUser/.bash_profile", StringComparison.Ordinal));
 
             Assert.That(plan.ShellKind, Is.EqualTo(CliPathSetupShellKind.Bash));
             Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.bash_profile"));
@@ -47,14 +81,44 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
-        public void BuildPosixPlan_WhenShellIsBashWithoutBashrcUsesBashProfile()
+        public void BuildPosixPlan_WhenShellIsBashAndProfileExistsUsesProfile()
         {
-            // Verifies that bash has a deterministic profile target when bashrc is absent.
+            // Verifies that PATH repair does not create .bash_profile over an existing .profile.
             CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
                 "/bin/bash",
                 "/Users/ExampleUser",
                 null,
-                "/Users/ExampleUser/.local/bin");
+                "/Users/ExampleUser/.local/bin",
+                path => string.Equals(path, "/Users/ExampleUser/.profile", StringComparison.Ordinal));
+
+            Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.profile"));
+        }
+
+        [Test]
+        public void BuildPosixPlan_WhenShellIsBashAndBashLoginExistsUsesBashLogin()
+        {
+            // Verifies that bash profile selection follows login-shell precedence.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/bash",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => string.Equals(path, "/Users/ExampleUser/.bash_login", StringComparison.Ordinal)
+                    || string.Equals(path, "/Users/ExampleUser/.profile", StringComparison.Ordinal));
+
+            Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.bash_login"));
+        }
+
+        [Test]
+        public void BuildPosixPlan_WhenShellIsBashWithoutLoginProfilesUsesBashProfile()
+        {
+            // Verifies that bash creates the highest-precedence login profile when none exists.
+            CliPathSetupPlan plan = CliPathSetupPlanner.BuildPosixPlan(
+                "/bin/bash",
+                "/Users/ExampleUser",
+                null,
+                "/Users/ExampleUser/.local/bin",
+                path => false);
 
             Assert.That(plan.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.bash_profile"));
         }

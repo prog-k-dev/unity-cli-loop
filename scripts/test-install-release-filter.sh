@@ -578,6 +578,44 @@ test_posix_prints_zsh_path_setup_command_without_profile_write() {
   assert_file_not_exists "$home_dir/.zshrc"
 }
 
+test_posix_prints_zsh_path_setup_command_for_effective_zdotdir() {
+  work_dir="$TMP_DIR/posix-zsh-zdotdir-path-hint"
+  home_dir="$work_dir/home"
+  zsh_config_dir="$home_dir/.config/zsh"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir" "$zsh_config_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+  cat > "$mock_bin/zsh" <<'MOCK_ZSH'
+#!/bin/sh
+printf '%s\n' "__ULOOP_ZDOTDIR_START__"
+printf '%s\n' "$HOME/.config/zsh"
+printf '%s\n' "__ULOOP_ZDOTDIR_END__"
+MOCK_ZSH
+  chmod +x "$mock_bin/zsh"
+
+  HOME="$home_dir" \
+    SHELL="$mock_bin/zsh" \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$zsh_config_dir/.zshrc\""
+  assert_file_not_exists "$zsh_config_dir/.zshrc"
+}
+
 test_posix_prints_bash_path_setup_command_without_profile_write() {
   work_dir="$TMP_DIR/posix-bash-path-hint"
   home_dir="$work_dir/home"
@@ -605,6 +643,37 @@ test_posix_prints_bash_path_setup_command_without_profile_write() {
 
   assert_contains "$work_dir/output.txt" "Add this to your bash profile:"
   assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.bash_profile\""
+  assert_file_not_exists "$home_dir/.bash_profile"
+}
+
+test_posix_prints_bash_path_setup_command_for_existing_profile() {
+  work_dir="$TMP_DIR/posix-bash-profile-path-hint"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$home_dir/.profile"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/bash \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your bash profile:"
+  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.profile\""
   assert_file_not_exists "$home_dir/.bash_profile"
 }
 
@@ -721,7 +790,9 @@ test_posix_prints_prefix_manual_cleanup_when_npm_is_unavailable
 test_posix_prints_manual_cleanup_when_npm_prefix_cannot_be_inferred
 test_posix_removes_npm_package_before_replacing_same_bin_path
 test_posix_prints_zsh_path_setup_command_without_profile_write
+test_posix_prints_zsh_path_setup_command_for_effective_zdotdir
 test_posix_prints_bash_path_setup_command_without_profile_write
+test_posix_prints_bash_path_setup_command_for_existing_profile
 test_posix_prints_fish_path_setup_command_without_profile_write
 test_powershell_latest_skips_prerelease_assets
 test_git_bash_latest_installs_windows_zip_asset
