@@ -118,6 +118,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                 data.NeedsUpdate,
                 data.NeedsDowngrade,
                 data.CanUninstallCli,
+                data.NeedsCliPathSetup,
                 data.CliVersion,
                 data.RequiredCliVersion);
             bool enabled = IsInstallCliButtonEnabled(
@@ -203,6 +204,7 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             bool needsUpdate,
             bool needsDowngrade,
             bool canUninstallCli,
+            bool needsCliPathSetup,
             string cliVersion,
             string requiredCliVersion)
         {
@@ -214,6 +216,11 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             bool isUninstallAction = IsUninstallCliAction(isCliInstalled, needsUpdate, needsDowngrade, canUninstallCli);
             if (isInstallingCli)
             {
+                if (needsCliPathSetup)
+                {
+                    return "Fixing PATH...";
+                }
+
                 return isUninstallAction ? "Uninstalling..." : "Installing...";
             }
 
@@ -230,6 +237,11 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
             if (needsDowngrade)
             {
                 return $"Downgrade CLI (v{cliVersion} \u2192 v{requiredCliVersion})";
+            }
+
+            if (needsCliPathSetup)
+            {
+                return "Fix PATH";
             }
 
             return canUninstallCli ? "Uninstall CLI" : "Install CLI";
