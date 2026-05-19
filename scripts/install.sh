@@ -20,6 +20,63 @@ report_path_shadowing() {
   echo "Move $INSTALL_DIR earlier in PATH, or remove the legacy installation if it owns that command."
 }
 
+detect_user_shell_name() {
+  shell_path=${SHELL:-}
+  shell_name=${shell_path##*/}
+
+  case "$shell_name" in
+    zsh|bash|fish) echo "$shell_name" ;;
+    *) echo "" ;;
+  esac
+}
+
+format_install_dir_for_shell_profile() {
+  home_prefix="$HOME/"
+  case "$INSTALL_DIR" in
+    "$HOME") echo "\$HOME" ;;
+    "$home_prefix"*) echo "\$HOME/${INSTALL_DIR#"$home_prefix"}" ;;
+    *) echo "$INSTALL_DIR" ;;
+  esac
+}
+
+print_path_setup_hint() {
+  shell_name=$(detect_user_shell_name)
+  shell_install_dir=$(format_install_dir_for_shell_profile)
+
+  case "$shell_name" in
+    zsh)
+      profile_path="${ZDOTDIR:-$HOME}/.zshrc"
+      profile_line="export PATH=\"$shell_install_dir:\$PATH\""
+      echo "Add this to your zsh profile:"
+      echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""
+      return
+      ;;
+    bash)
+      if [ -f "$HOME/.bashrc" ]; then
+        profile_path="$HOME/.bashrc"
+      else
+        profile_path="$HOME/.bash_profile"
+      fi
+      profile_line="export PATH=\"$shell_install_dir:\$PATH\""
+      echo "Add this to your bash profile:"
+      echo "  echo '$profile_line' >> \"$profile_path\" && source \"$profile_path\""
+      return
+      ;;
+    fish)
+      profile_dir="$HOME/.config/fish"
+      profile_path="$profile_dir/config.fish"
+      profile_line="fish_add_path \"$shell_install_dir\""
+      echo "Add this to your fish config:"
+      echo "  mkdir -p \"$profile_dir\" && echo '$profile_line' >> \"$profile_path\""
+      return
+      ;;
+  esac
+
+  echo "Add $INSTALL_DIR to PATH in your shell profile."
+  echo "For POSIX shells, add:"
+  echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+}
+
 detect_asset_name() {
   os=$(uname -s)
   arch=$(uname -m)
@@ -319,8 +376,7 @@ case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *)
     echo "Installed uloop to $INSTALL_DIR, but that directory is not in PATH."
-    echo "Add this to your shell profile:"
-    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    print_path_setup_hint
     ;;
 esac
 

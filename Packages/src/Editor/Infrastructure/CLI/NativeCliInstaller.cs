@@ -674,10 +674,15 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
 
         internal static string GetCurrentUserGlobalCliInstallPath(RuntimePlatform platform)
         {
-            string installDirectory = GetInstallDirectoryForCurrentUser(platform);
+            string installDirectory = GetCurrentUserGlobalCliInstallDirectory(platform);
             return string.IsNullOrWhiteSpace(installDirectory)
                 ? null
                 : GetGlobalCliInstallPath(installDirectory, platform);
+        }
+
+        internal static string GetCurrentUserGlobalCliInstallDirectory(RuntimePlatform platform)
+        {
+            return GetInstallDirectoryForCurrentUser(platform);
         }
 
         private static string GetInstallDirectoryForCurrentUser(RuntimePlatform platform)
@@ -1108,6 +1113,16 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             bool removeLegacyLaunchers)
         {
             return NativeCliInstaller.GetInstallCommand(platform, cliReleaseTag, removeLegacyLaunchers);
+        }
+
+        public CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+        {
+            return CliPathSetupPlanner.BuildCurrentUserPlan(platform);
+        }
+
+        public CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+        {
+            return CliPathSetupPlanner.ApplyPlanToFileSystem(pathSetupPlan);
         }
     }
 }

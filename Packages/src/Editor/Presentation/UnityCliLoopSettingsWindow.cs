@@ -736,6 +736,10 @@ namespace io.github.hatayama.UnityCliLoop.Presentation
                         "OK");
                     return;
                 }
+
+                await CliPathSetupPrompt.ShowAfterInstallIfNeededAsync(
+                    UnityEngine.Application.platform,
+                    CancellationToken.None);
             }
             finally
             {

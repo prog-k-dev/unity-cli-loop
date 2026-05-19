@@ -70,23 +70,73 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
                 Is.EqualTo("install " + CliConstants.MINIMUM_REQUIRED_CLI_RELEASE_TAG));
         }
 
+        [Test]
+        public async Task IsCliVisibleFromShellAsync_DelegatesToDetector()
+        {
+            // Verifies that UI can ask specifically whether the terminal shell resolves uloop.
+            CliSetupApplicationService service = new(
+                new FakeCliInstallationDetector(new string[] { null }, isCliVisibleFromShell: false),
+                new FakeNativeCliInstaller());
+
+            bool result = await service.IsCliVisibleFromShellAsync(
+                RuntimePlatform.OSXEditor,
+                CancellationToken.None);
+
+            Assert.That(result, Is.False);
+        }
+
+        [Test]
+        public void GetGlobalCliPathSetupPlan_DelegatesToInstaller()
+        {
+            // Verifies that UI receives shell-specific PATH setup data through the application service.
+            FakeNativeCliInstaller nativeCliInstaller = new();
+            CliSetupApplicationService service = new(
+                new FakeCliInstallationDetector(new string[] { null }),
+                nativeCliInstaller);
+
+            CliPathSetupPlan result = service.GetGlobalCliPathSetupPlan(RuntimePlatform.OSXEditor);
+
+            Assert.That(result.ShellKind, Is.EqualTo(CliPathSetupShellKind.Zsh));
+            Assert.That(result.ConfigurationFilePath, Is.EqualTo("/Users/ExampleUser/.zshrc"));
+        }
+
+        [Test]
+        public void ApplyGlobalCliPathSetup_DelegatesToInstaller()
+        {
+            // Verifies that explicit UI approval flows through the application service.
+            FakeNativeCliInstaller nativeCliInstaller = new();
+            CliSetupApplicationService service = new(
+                new FakeCliInstallationDetector(new string[] { null }),
+                nativeCliInstaller);
+            CliPathSetupPlan plan = nativeCliInstaller.GetGlobalCliPathSetupPlan(RuntimePlatform.OSXEditor);
+
+            CliInstallResult result = service.ApplyGlobalCliPathSetup(plan);
+
+            Assert.That(result.Success, Is.True);
+            Assert.That(nativeCliInstaller.AppliedPathSetup, Is.True);
+        }
+
         private sealed class FakeCliInstallationDetector : ICliInstallationDetector
         {
             private readonly string[] _versions;
+            private readonly bool _isCliVisibleFromShell;
             private int _versionIndex;
 
-            public FakeCliInstallationDetector(string[] versions)
+            public FakeCliInstallationDetector(string[] versions, bool isCliVisibleFromShell = true)
             {
                 Debug.Assert(versions != null, "versions must not be null");
                 Debug.Assert(versions.Length > 0, "versions must not be empty");
 
                 _versions = versions;
+                _isCliVisibleFromShell = isCliVisibleFromShell;
             }
             public bool IsCliInstalled() => GetCachedCliVersion() != null;
             public string GetCachedCliVersion() => _versions[_versionIndex];
             public string GetCachedCliExecutablePath() => "";
             public bool IsCheckCompleted() => true;
             public Task RefreshCliVersionAsync(CancellationToken ct) => Task.CompletedTask;
+            public Task<bool> IsCliVisibleFromShellAsync(RuntimePlatform platform, CancellationToken ct)
+                => Task.FromResult(_isCliVisibleFromShell);
 
             public Task ForceRefreshCliVersionAsync(CancellationToken ct)
             {
@@ -104,6 +154,7 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         private sealed class FakeNativeCliInstaller : INativeCliInstaller
         {
             public string InstalledVersion { get; private set; }
+            public bool AppliedPathSetup { get; private set; }
 
             public bool IsPackageOwnedCurrentUserInstallPath(string cliExecutablePath, RuntimePlatform platform)
             {
@@ -122,6 +173,24 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             public Task<CliInstallResult> UninstallGlobalCliAsync(RuntimePlatform platform, CancellationToken ct)
             {
                 return Task.FromResult(new CliInstallResult(true, ""));
+            }
+
+            public CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+            {
+                return new CliPathSetupPlan(
+                    CliPathSetupShellKind.Zsh,
+                    "zsh",
+                    true,
+                    "/Users/ExampleUser/.local/bin",
+                    "/Users/ExampleUser/.zshrc",
+                    "export PATH=\"$HOME/.local/bin:$PATH\"",
+                    "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> /Users/ExampleUser/.zshrc");
+            }
+
+            public CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+            {
+                AppliedPathSetup = true;
+                return new CliInstallResult(true, "");
             }
 
             public NativeCliInstallCommand GetGlobalCliInstallCommand(

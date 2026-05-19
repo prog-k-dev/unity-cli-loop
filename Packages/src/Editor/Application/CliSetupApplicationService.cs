@@ -37,6 +37,7 @@ namespace io.github.hatayama.UnityCliLoop.Application
         bool IsCheckCompleted();
         Task RefreshCliVersionAsync(CancellationToken ct);
         Task ForceRefreshCliVersionAsync(CancellationToken ct);
+        Task<bool> IsCliVisibleFromShellAsync(RuntimePlatform platform, CancellationToken ct);
         void InvalidateCache();
     }
 
@@ -48,6 +49,8 @@ namespace io.github.hatayama.UnityCliLoop.Application
         bool IsPackageOwnedCurrentUserInstallPath(string cliExecutablePath, RuntimePlatform platform);
         Task<CliInstallResult> InstallGlobalCliAsync(RuntimePlatform platform, string cliReleaseTag, CancellationToken ct);
         Task<CliInstallResult> UninstallGlobalCliAsync(RuntimePlatform platform, CancellationToken ct);
+        CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform);
+        CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan);
         NativeCliInstallCommand GetGlobalCliInstallCommand(
             RuntimePlatform platform,
             string cliReleaseTag,
@@ -101,6 +104,11 @@ namespace io.github.hatayama.UnityCliLoop.Application
         public Task ForceRefreshCliVersionAsync(CancellationToken ct)
         {
             return _cliInstallationDetector.ForceRefreshCliVersionAsync(ct);
+        }
+
+        public Task<bool> IsCliVisibleFromShellAsync(RuntimePlatform platform, CancellationToken ct)
+        {
+            return _cliInstallationDetector.IsCliVisibleFromShellAsync(platform, ct);
         }
 
         public void InvalidateCliCache()
@@ -165,6 +173,16 @@ namespace io.github.hatayama.UnityCliLoop.Application
                 GetMinimumRequiredCliReleaseTag(),
                 removeLegacyLaunchers);
         }
+
+        public CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+        {
+            return _nativeCliInstaller.GetGlobalCliPathSetupPlan(platform);
+        }
+
+        public CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+        {
+            return _nativeCliInstaller.ApplyGlobalCliPathSetup(pathSetupPlan);
+        }
     }
 
     /// <summary>
@@ -221,6 +239,11 @@ namespace io.github.hatayama.UnityCliLoop.Application
             return GetService().ForceRefreshCliVersionAsync(ct);
         }
 
+        public static Task<bool> IsCliVisibleFromShellAsync(RuntimePlatform platform, CancellationToken ct)
+        {
+            return GetService().IsCliVisibleFromShellAsync(platform, ct);
+        }
+
         public static void InvalidateCliCache()
         {
             GetService().InvalidateCliCache();
@@ -268,6 +291,16 @@ namespace io.github.hatayama.UnityCliLoop.Application
             bool removeLegacyLaunchers)
         {
             return GetService().GetGlobalCliInstallCommand(platform, removeLegacyLaunchers);
+        }
+
+        public static CliPathSetupPlan GetGlobalCliPathSetupPlan(RuntimePlatform platform)
+        {
+            return GetService().GetGlobalCliPathSetupPlan(platform);
+        }
+
+        public static CliInstallResult ApplyGlobalCliPathSetup(CliPathSetupPlan pathSetupPlan)
+        {
+            return GetService().ApplyGlobalCliPathSetup(pathSetupPlan);
         }
     }
 }

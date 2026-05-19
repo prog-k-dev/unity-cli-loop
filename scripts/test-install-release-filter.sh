@@ -35,6 +35,15 @@ assert_not_contains() {
   fi
 }
 
+assert_file_not_exists() {
+  path=$1
+
+  if [ -e "$path" ]; then
+    echo "Expected file not to exist: $path" >&2
+    exit 1
+  fi
+}
+
 write_releases_json() {
   output_path=$1
 
@@ -539,6 +548,96 @@ test_posix_removes_npm_package_before_replacing_same_bin_path() {
   assert_contains "$work_dir/output.txt" "uloop mock version"
 }
 
+test_posix_prints_zsh_path_setup_command_without_profile_write() {
+  work_dir="$TMP_DIR/posix-zsh-path-hint"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/zsh \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your zsh profile:"
+  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.zshrc\""
+  assert_file_not_exists "$home_dir/.zshrc"
+}
+
+test_posix_prints_bash_path_setup_command_without_profile_write() {
+  work_dir="$TMP_DIR/posix-bash-path-hint"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/bin/bash \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your bash profile:"
+  assert_contains "$work_dir/output.txt" "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \"$home_dir/.bash_profile\""
+  assert_file_not_exists "$home_dir/.bash_profile"
+}
+
+test_posix_prints_fish_path_setup_command_without_profile_write() {
+  work_dir="$TMP_DIR/posix-fish-path-hint"
+  home_dir="$work_dir/home"
+  mock_bin="$work_dir/bin"
+  install_dir="$home_dir/.local/bin"
+  releases_json="$work_dir/releases.json"
+  curl_log="$work_dir/curl.log"
+  npm_log="$work_dir/npm.log"
+  mkdir -p "$work_dir" "$home_dir"
+  : > "$curl_log"
+  : > "$npm_log"
+  write_releases_json "$releases_json"
+  write_mock_commands "$mock_bin"
+
+  HOME="$home_dir" \
+    SHELL=/opt/homebrew/bin/fish \
+    PATH="$mock_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ULOOP_VERSION=latest \
+    ULOOP_INSTALL_DIR="$install_dir" \
+    RELEASES_JSON="$releases_json" \
+    CURL_LOG="$curl_log" \
+    NPM_LOG="$npm_log" \
+    LEGACY_ULOOP="" \
+    "$ROOT_DIR/scripts/install.sh" > "$work_dir/output.txt" 2> "$work_dir/stderr.txt"
+
+  assert_contains "$work_dir/output.txt" "Add this to your fish config:"
+  assert_contains "$work_dir/output.txt" "mkdir -p \"$home_dir/.config/fish\" && echo 'fish_add_path \"\$HOME/.local/bin\"' >> \"$home_dir/.config/fish/config.fish\""
+  assert_file_not_exists "$home_dir/.config/fish/config.fish"
+}
+
 test_powershell_latest_skips_prerelease_assets() {
   assert_contains "$ROOT_DIR/scripts/install.ps1" '$LatestBetaVersion = "latest-beta"'
   assert_contains "$ROOT_DIR/scripts/install.ps1" 'if ($ReleaseChannel -eq "stable" -and $Release.prerelease) {'
@@ -621,6 +720,9 @@ test_posix_does_not_infer_npm_prefix_from_non_npm_command
 test_posix_prints_prefix_manual_cleanup_when_npm_is_unavailable
 test_posix_prints_manual_cleanup_when_npm_prefix_cannot_be_inferred
 test_posix_removes_npm_package_before_replacing_same_bin_path
+test_posix_prints_zsh_path_setup_command_without_profile_write
+test_posix_prints_bash_path_setup_command_without_profile_write
+test_posix_prints_fish_path_setup_command_without_profile_write
 test_powershell_latest_skips_prerelease_assets
 test_git_bash_latest_installs_windows_zip_asset
 test_powershell_installer_avoids_optional_archive_cmdlets

@@ -92,6 +92,23 @@ namespace io.github.hatayama.UnityCliLoop.Infrastructure
             _cacheInitialized = true;
         }
 
+        public Task<bool> IsCliVisibleFromShellAsync(RuntimePlatform platform, CancellationToken ct)
+        {
+            if (platform == RuntimePlatform.WindowsEditor)
+            {
+                return Task.FromResult(true);
+            }
+
+            return Task.Run(
+                () =>
+                {
+                    CliInstallationDetection detection = DetectShellCliInstallationBlocking(platform, ct);
+                    return !string.IsNullOrEmpty(detection.Version)
+                        || !string.IsNullOrEmpty(detection.ExecutablePath);
+                },
+                ct);
+        }
+
         public void InvalidateCache()
         {
             _cachedCliVersion = null;
