@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -20,6 +21,15 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             "Packages/io.github.hatayama.uloopmcp/Runtime/Common/InputVisualizationCanvas.prefab";
         private const string RuntimeAssemblyDefinitionPath =
             "Packages/src/Runtime/uLoopMCP.Runtime.asmdef";
+        private static readonly string[] RuntimeOverlayPrefabPaths =
+        {
+            PrefabPath,
+            "Packages/io.github.hatayama.uloopmcp/Runtime/SimulateKeyboard/SimulateKeyboardOverlay.prefab",
+            "Packages/io.github.hatayama.uloopmcp/Runtime/SimulateMouseUi/SimulateMouseUiOverlay.prefab",
+            "Packages/io.github.hatayama.uloopmcp/Runtime/SimulateMouseInput/SimulateMouseInputOverlay.prefab",
+            "Packages/io.github.hatayama.uloopmcp/Runtime/RecordInput/RecordInputOverlay.prefab",
+            "Packages/io.github.hatayama.uloopmcp/Runtime/ReplayInput/ReplayInputOverlay.prefab"
+        };
 
         [Test]
         public void RuntimeAssemblyDefinition_WhenScanned_IsAttachableAndNotAutoReferenced()
@@ -109,6 +119,20 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
         }
 
         [Test]
+        public void RuntimeOverlayPrefabs_WhenScanned_DoNotReferenceAssetsScripts()
+        {
+            // Verifies runtime package prefabs do not depend on project-only scripts.
+            List<string> assetScriptReferences = new List<string>();
+
+            for (int i = 0; i < RuntimeOverlayPrefabPaths.Length; i++)
+            {
+                CollectAssetScriptReferences(RuntimeOverlayPrefabPaths[i], assetScriptReferences);
+            }
+
+            Assert.That(assetScriptReferences, Is.Empty);
+        }
+
+        [Test]
         public void OverlayCanvasFactoryService_WhenPrefabHasMissingScript_ThrowsInvalidOperationException()
         {
             // Verifies overlay creation fails fast when prefab import state contains missing scripts.
@@ -148,6 +172,35 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             string absolutePath = Path.Combine(UnityCliLoopPathResolver.GetProjectRoot(), relativePath);
 
             return File.ReadAllText(absolutePath);
+        }
+
+        private static void CollectAssetScriptReferences(string prefabPath, List<string> assetScriptReferences)
+        {
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            Assert.That(prefab, Is.Not.Null, prefabPath);
+
+            Transform[] transforms = prefab.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                MonoBehaviour[] behaviours = transforms[i].GetComponents<MonoBehaviour>();
+                for (int j = 0; j < behaviours.Length; j++)
+                {
+                    MonoBehaviour behaviour = behaviours[j];
+                    if (behaviour == null)
+                    {
+                        continue;
+                    }
+
+                    MonoScript script = MonoScript.FromMonoBehaviour(behaviour);
+                    Assert.That(script, Is.Not.Null, transforms[i].name);
+
+                    string scriptPath = AssetDatabase.GetAssetPath(script);
+                    if (scriptPath.StartsWith("Assets/", StringComparison.Ordinal))
+                    {
+                        assetScriptReferences.Add(prefabPath + " -> " + transforms[i].name + " -> " + scriptPath);
+                    }
+                }
+            }
         }
 
         private static string CreateMissingScriptPrefab(out string fixtureFolderPath)
