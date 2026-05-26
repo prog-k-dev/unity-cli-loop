@@ -1,5 +1,7 @@
+using System;
 using UnityEngine;
 using UnityEditor;
+using UnityObject = UnityEngine.Object;
 
 using io.github.hatayama.UnityCliLoop.Runtime;
 
@@ -11,9 +13,17 @@ namespace io.github.hatayama.UnityCliLoop.FirstPartyTools
     /// </summary>
     internal sealed class OverlayCanvasFactoryService
     {
-        private const string CANVAS_PREFAB_PATH = "Packages/io.github.hatayama.uloopmcp/Runtime/Common/InputVisualizationCanvas.prefab";
+        internal const string CANVAS_PREFAB_PATH = "Packages/io.github.hatayama.uloopmcp/Runtime/Common/InputVisualizationCanvas.prefab";
+        private const string ExistingCanvasSource = "existing InputVisualizationCanvas instance";
 
+        private readonly string _canvasPrefabPath;
         private InputVisualizationCanvas _instance;
+
+        public OverlayCanvasFactoryService(string canvasPrefabPath)
+        {
+            Debug.Assert(!string.IsNullOrWhiteSpace(canvasPrefabPath), "canvasPrefabPath must not be null or whitespace");
+            _canvasPrefabPath = canvasPrefabPath;
+        }
 
         public InputVisualizationCanvas VisualizationCanvas
         {
@@ -39,16 +49,18 @@ namespace io.github.hatayama.UnityCliLoop.FirstPartyTools
 
             // Domain Reload resets _instance but DontDestroyOnLoad objects survive; reclaim one and destroy duplicates
             InputVisualizationCanvas[] existing =
-                Object.FindObjectsByType<InputVisualizationCanvas>(FindObjectsSortMode.None);
+                UnityObject.FindObjectsByType<InputVisualizationCanvas>(FindObjectsSortMode.None);
             for (int i = 0; i < existing.Length; i++)
             {
+                ValidateMissingScripts(existing[i].gameObject, ExistingCanvasSource);
+
                 if (_instance == null)
                 {
                     _instance = existing[i];
                 }
                 else
                 {
-                    Object.DestroyImmediate(existing[i].gameObject);
+                    UnityObject.DestroyImmediate(existing[i].gameObject);
                 }
             }
             if (_instance != null)
@@ -56,13 +68,49 @@ namespace io.github.hatayama.UnityCliLoop.FirstPartyTools
                 return;
             }
 
-            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CANVAS_PREFAB_PATH);
-            Debug.Assert(prefab != null, $"InputVisualizationCanvas prefab not found at {CANVAS_PREFAB_PATH}");
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(_canvasPrefabPath);
+            if (prefab == null)
+            {
+                throw new InvalidOperationException($"InputVisualizationCanvas prefab not found at {_canvasPrefabPath}");
+            }
+
+            ValidateMissingScripts(prefab, _canvasPrefabPath);
 
             GameObject go = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-            Object.DontDestroyOnLoad(go);
+            ValidateMissingScripts(go, _canvasPrefabPath);
+            UnityObject.DontDestroyOnLoad(go);
             _instance = go.GetComponent<InputVisualizationCanvas>();
-            Debug.Assert(_instance != null, "InputVisualizationCanvas component not found on prefab");
+            if (_instance == null)
+            {
+                UnityObject.DestroyImmediate(go);
+                throw new InvalidOperationException(
+                    $"InputVisualizationCanvas component not found on prefab at {_canvasPrefabPath}");
+            }
+        }
+
+        private static void ValidateMissingScripts(GameObject root, string sourcePath)
+        {
+            Debug.Assert(root != null, "root must not be null");
+            int missingScriptCount = CountMissingScripts(root);
+            if (missingScriptCount == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"InputVisualizationCanvas prefab contains {missingScriptCount} missing script reference(s): {sourcePath}");
+        }
+
+        private static int CountMissingScripts(GameObject root)
+        {
+            int missingScriptCount = 0;
+            Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                missingScriptCount += GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transforms[i].gameObject);
+            }
+
+            return missingScriptCount;
         }
     }
 
@@ -71,7 +119,8 @@ namespace io.github.hatayama.UnityCliLoop.FirstPartyTools
     /// </summary>
     internal static class OverlayCanvasFactory
     {
-        private static readonly OverlayCanvasFactoryService ServiceValue = new OverlayCanvasFactoryService();
+        private static readonly OverlayCanvasFactoryService ServiceValue =
+            new OverlayCanvasFactoryService(OverlayCanvasFactoryService.CANVAS_PREFAB_PATH);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStaticFields()

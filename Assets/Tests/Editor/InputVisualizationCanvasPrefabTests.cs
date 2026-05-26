@@ -1,9 +1,11 @@
+using System;
 using System.IO;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 
+using io.github.hatayama.UnityCliLoop.FirstPartyTools;
 using io.github.hatayama.UnityCliLoop.Runtime;
 using io.github.hatayama.UnityCliLoop.ToolContracts;
 
@@ -106,6 +108,32 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
             }
         }
 
+        [Test]
+        public void OverlayCanvasFactoryService_WhenPrefabHasMissingScript_ThrowsInvalidOperationException()
+        {
+            // Verifies overlay creation fails fast when prefab import state contains missing scripts.
+            string fixtureFolderPath;
+            string fixturePrefabPath = CreateMissingScriptPrefab(out fixtureFolderPath);
+            try
+            {
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(fixturePrefabPath);
+                Assert.That(prefab, Is.Not.Null);
+                Assert.That(GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(prefab), Is.EqualTo(1));
+
+                OverlayCanvasFactoryService service = new OverlayCanvasFactoryService(fixturePrefabPath);
+
+                InvalidOperationException exception =
+                    Assert.Throws<InvalidOperationException>(() => service.EnsureExists());
+
+                Assert.That(exception.Message, Does.Contain("missing script"));
+                Assert.That(exception.Message, Does.Contain(fixturePrefabPath));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(fixtureFolderPath);
+            }
+        }
+
         private static void AssertSerializedReference(UnityEngine.Object target, string propertyName)
         {
             SerializedObject serializedObject = new SerializedObject(target);
@@ -121,5 +149,66 @@ namespace io.github.hatayama.UnityCliLoop.Tests.Editor
 
             return File.ReadAllText(absolutePath);
         }
+
+        private static string CreateMissingScriptPrefab(out string fixtureFolderPath)
+        {
+            string folderName = "GeneratedOverlayMissingScriptTest_" + Guid.NewGuid().ToString("N");
+            fixtureFolderPath = "Assets/Tests/Editor/" + folderName;
+            AssetDatabase.CreateFolder("Assets/Tests/Editor", folderName);
+
+            string prefabPath = fixtureFolderPath + "/InputVisualizationCanvasMissingScript.prefab";
+            File.WriteAllText(prefabPath, MissingScriptPrefabYaml);
+            AssetDatabase.ImportAsset(prefabPath);
+            return prefabPath;
+        }
+
+        private const string MissingScriptPrefabYaml =
+            @"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 200000}
+  - component: {fileID: 300000}
+  m_Layer: 0
+  m_Name: InputVisualizationCanvasMissingScript
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &200000
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 100000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &300000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 100000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0123456789abcdef0123456789abcdef, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+";
     }
 }
